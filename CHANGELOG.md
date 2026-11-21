@@ -5,6 +5,16 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.8.0] — 2026-11-21
+### Adicionado
+- `status-projeto autonomo` (e `chamadas_autonomas` no `estado`): acha os scripts que rodam o Claude sozinho
+  (`claude -p`/`--print` em `.sh`, `.ps1`, `.bat`, `.js`, `.py`, `package.json`...), inclusive no PowerShell com o
+  caminho numa variável (`Start-Process -FilePath $Claude -ArgumentList "-p ..."`), e diz se a chamada já leva
+  `STATUS_PROJETO_TIPO=autonomo`. `--aplicar ARQUIVO:LINHA` inclui a variável: no shell antes do `claude` (com `env`
+  depois de `exec`/`nohup`/`sudo`), no `.ps1`/`.bat` numa linha antes. Em `.js`/`.py`, a edição é à mão.
+- `/instalar-status` (passo 6b): mostra essas chamadas e oferece incluir a variável, para o tempo de um supervisor
+  entrar como autônomo no relatório.
+
 ## [1.7.0] — 2026-11-21
 ### Adicionado
 - Corte do ✅: `status-projeto status-md --cortar-concluidos [--dias N] [--ver ARQUIVO]` mantém no ✅ só os itens dos

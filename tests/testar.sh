@@ -311,7 +311,7 @@ json.dump(d, open(p, "w"))
 PY
 }
 for cmd in relatorio "relatorio --todos" historico cronograma resumo ajuda contradicoes "contradicoes --json" \
-           "contradicoes --ignoradas" guia estado espalhado fatias-soltas github verificar reparar; do
+           "contradicoes --ignoradas" guia estado espalhado fatias-soltas autonomo github verificar reparar; do
   velho; F1="$(foto)"; $SP --raiz "$H" $cmd > /dev/null 2>&1; F2="$(foto)"
   checa "$cmd não grava" '[ "$F1" = "$F2" ]'
 done
@@ -442,6 +442,28 @@ python3 -c "import json;p='$Q/.claude-status/config.json';d=json.load(open(p));d
 $SP --raiz "$Q" status-md --cortar-concluidos > /dev/null
 checa "linha existente: mantém a referência (VERSOES.json e PROGRESSO.md), sem o (desde)" "tail -1 $Q/STATUS.md | grep -qx -- '- Versões anteriores: ver VERSOES.json e PROGRESSO.md' && ! grep -q VELHA2 $Q/STATUS.md"
 checa "--dias 30 mantém um item de 20 dias" "printf '## 🌐 Codando\n## 📦 Fatia pronta, não iniciada\n## 🧪 Aguardando teste\n## ⏸️ Bloqueado (externo)\n## ✅ Concluído\n- [M] VINTE — x (desde %s)\n' $ANTIGA > $Q/STATUS.md && $SP --raiz $Q status-md --cortar-concluidos --dias 30 > /dev/null && grep -q VINTE $Q/STATUS.md"
+
+echo "== 15. Scripts com 'claude -p': acha e inclui STATUS_PROJETO_TIPO=autonomo"
+U="$BASE/autonomo"; rm -rf "$U"; mkdir -p "$U/supervisor"; git -C "$U" init -q -b main; ( cd "$U" && $SP init --usuario T > /dev/null )
+cat > "$U/rodar.sh" <<'EOF'
+#!/bin/bash
+# claude -p "comentário não conta"
+claude -p "$PROMPT" --dangerously-skip-permissions | tee -a "$LOG"
+  exec claude --continue -p "$P2"
+claude-status -p não é o claude
+EOF
+printf 'STATUS_PROJETO_TIPO=autonomo claude -p "x"\n' > "$U/supervisor/supervisor.sh"
+printf '$cmd = Get-Command claude.exe\n$Claude = $cmd.Source\n  $p = Start-Process -FilePath $Claude -ArgumentList "-p x" -NoNewWindow\n' > "$U/noite.ps1"
+printf 'spawn("claude", ["-p", prompt])\n' > "$U/agente.js"
+AU="$($SP --raiz $U autonomo --json)"
+ids() { python3 -c "import json,sys;print(' '.join(f\"{x['id']}:{int(x['ja_tem'])}:{int(x['aplicavel'])}\" for x in json.load(sys.stdin)))"; }
+checa "acha as 5 chamadas, sem comentário nem claude-status ($(ids <<<"$AU"))" "[ \"\$(ids <<<\"\$AU\")\" = 'agente.js:1:0:0 noite.ps1:3:0:1 rodar.sh:3:0:1 rodar.sh:4:0:1 supervisor/supervisor.sh:1:1:1' ]"
+$SP --raiz "$U" autonomo --aplicar rodar.sh:3 --aplicar rodar.sh:4 --aplicar noite.ps1:3 > /dev/null
+checa "shell: variável antes do claude; depois de exec, com env" "grep -qx 'STATUS_PROJETO_TIPO=autonomo claude -p \"\$PROMPT\" --dangerously-skip-permissions | tee -a \"\$LOG\"' $U/rodar.sh && grep -qx '  exec env STATUS_PROJETO_TIPO=autonomo claude --continue -p \"\$P2\"' $U/rodar.sh"
+checa "ps1: linha \$env antes do Start-Process, com o mesmo recuo" "sed -n 3p $U/noite.ps1 | grep -qx '  \$env:STATUS_PROJETO_TIPO = \"autonomo\"'"
+checa "depois de aplicar, nenhuma chamada aplicável sem a variável" "$SP --raiz $U autonomo --json | python3 -c \"import json,sys;assert all(x['ja_tem'] or not x['aplicavel'] for x in json.load(sys.stdin))\""
+checa ".js não é editado sozinho (pede edição à mão)" "! $SP --raiz $U autonomo --aplicar agente.js:1 2>/dev/null && grep -qx 'spawn(\"claude\", \[\"-p\", prompt\])' $U/agente.js"
+checa "estado traz chamadas_autonomas" "$SP --raiz $U estado | grep -q '\"chamadas_autonomas\"'"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

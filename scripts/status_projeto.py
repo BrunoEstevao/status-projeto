@@ -183,6 +183,110 @@ def fatias_fora_da_pasta(raiz, cfg=None):
     return out
 
 
+# ------------------------------------------------------------------- scripts que rodam o Claude sozinho
+
+EXT_SCRIPT = (".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".js", ".mjs", ".cjs", ".ts", ".py", ".json", "makefile")
+RE_CLAUDE_P = re.compile(r"(?<![\w/.-])claude(?:\.exe|\.cmd)?\s[^\n]*?(?<!\S)(?:-p|--print)(?![\w-])")
+RE_CLAUDE_SPAWN = re.compile(r"""['"]claude(?:\.exe|\.cmd)?['"]\s*,\s*\[[^\]]*['"](?:-p|--print)['"]""")
+RE_COMENTARIO = re.compile(r"^\s*(#(?!!)|//|rem\s|::|<#)", re.I)
+# PowerShell com o caminho do claude numa variável: Start-Process -FilePath $Claude -ArgumentList "-p ..." ou & $Claude -p
+RE_PS_INDIRETO = re.compile(r"(Start-Process\b[^\n]*-ArgumentList\b|&\s*\$\w+\s)[^\n]*(?<![\w-])(?:-p|--print)(?![\w-])", re.I)
+
+
+# definição que vale para o resto do script (VAR=x na frente de um comando vale só para aquele comando)
+RE_DEFINE_TIPO = re.compile(r"^\s*(export\s+STATUS_PROJETO_TIPO=|STATUS_PROJETO_TIPO=\S+\s*(;|$)|\$env:STATUS_PROJETO_TIPO\s*=|"
+                            r"set\s+\"?STATUS_PROJETO_TIPO=|.*process\.env\.STATUS_PROJETO_TIPO\s*=|"
+                            r".*os\.environ\[\s*['\"]STATUS_PROJETO_TIPO['\"]\s*\]\s*=)", re.I)
+
+
+def chama_claude_p(linha, texto, ext):
+    if RE_CLAUDE_P.search(linha) or RE_CLAUDE_SPAWN.search(linha):
+        return True
+    return ext == ".ps1" and bool(RE_PS_INDIRETO.search(linha)) and bool(re.search(r"\bclaude(\.exe|\.cmd)?\b", texto, re.I))
+
+
+def chamadas_autonomas(raiz):
+    """Linhas de scripts que chamam 'claude -p' / '--print' (ou spawn('claude', ['-p', ...])), dizendo se a chamada
+    já leva STATUS_PROJETO_TIPO=autonomo (na linha ou definida antes no arquivo)."""
+    out = []
+    for rel, situacao in sorted(arquivos_do_repo(raiz, EXT_SCRIPT).items()):
+        if rel.startswith(c.PASTA_CFG):
+            continue
+        texto = ler(os.path.join(raiz, rel))
+        linhas = texto.splitlines()
+        ext = os.path.splitext(rel)[1].lower()
+        definida = None
+        for i, l in enumerate(linhas, 1):
+            if RE_DEFINE_TIPO.match(l) and not RE_COMENTARIO.match(l) and definida is None:
+                definida = i
+            if RE_COMENTARIO.match(l) or not chama_claude_p(l, texto, ext):
+                continue
+            tem = "STATUS_PROJETO_TIPO" in l or (definida is not None and definida < i)
+            out.append({"id": f"{rel}:{i}", "arquivo": rel, "linha": i, "trecho": l.strip()[:160], "situacao": situacao,
+                        "ja_tem": tem, "aplicavel": ext in (".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", "")})
+    return out
+
+
+def aplicar_autonomo(raiz, ident):
+    rel, _, n = ident.rpartition(":")
+    if not rel or not n.isdigit():
+        sair(f"Use --aplicar ARQUIVO:LINHA (como aparece na lista). Recebido: {ident}")
+    p = os.path.join(raiz, rel)
+    texto = ler(p)
+    linhas = texto.split("\n")
+    i = int(n) - 1
+    ext = os.path.splitext(rel)[1].lower()
+    if i >= len(linhas) or not chama_claude_p(linhas[i], texto, ext):
+        sair(f"{ident}: a linha não tem mais a chamada 'claude -p' (o arquivo mudou?). Rode `status-projeto autonomo`.")
+    l = linhas[i]
+    recuo = re.match(r"\s*", l).group(0)
+    if ext == ".ps1":
+        linhas.insert(i, f'{recuo}$env:STATUS_PROJETO_TIPO = "autonomo"')
+    elif ext in (".bat", ".cmd"):
+        linhas.insert(i, f"{recuo}set STATUS_PROJETO_TIPO=autonomo")
+    elif ext in (".sh", ".bash", ".zsh", ""):
+        m = RE_CLAUDE_P.search(l)
+        antes = l[:m.start()]
+        # depois de exec/nohup/sudo/time/xargs a atribuição VAR=x não vale: usa env
+        pre = "env STATUS_PROJETO_TIPO=autonomo " if re.search(r"\b(exec|nohup|sudo|time|xargs|nice|timeout)\s+$", antes) \
+            else "STATUS_PROJETO_TIPO=autonomo "
+        linhas[i] = antes + pre + l[m.start():]
+    else:
+        sair(f"{ident}: em {ext or 'esse arquivo'} a variável vai no ambiente da chamada (ex.: "
+             "env: {...process.env, STATUS_PROJETO_TIPO: 'autonomo'}); edite à mão, com o ok do usuário.")
+    escrever(p, "\n".join(linhas))
+    return rel
+
+
+def cmd_autonomo(a):
+    raiz = a.raiz
+    if a.aplicar:
+        for ident in a.aplicar:
+            alvo = next((x for x in chamadas_autonomas(raiz) if x["id"] == ident), None)
+            if alvo and alvo["ja_tem"]:
+                print(f"{ident}: já leva STATUS_PROJETO_TIPO=autonomo; nada mudou.")
+                continue
+            aplicar_autonomo(raiz, ident)
+            print(f"{ident}: STATUS_PROJETO_TIPO=autonomo incluído (mostre o git diff).")
+        return
+    lst = chamadas_autonomas(raiz)
+    if a.json:
+        print(json.dumps(lst, ensure_ascii=False, indent=2))
+        return
+    if not lst:
+        print("Nenhum script chama 'claude -p' neste repositório.")
+        return
+    print("Scripts que rodam o Claude sozinho ('claude -p'):")
+    for x in lst:
+        st = "✅ já leva STATUS_PROJETO_TIPO=autonomo" if x["ja_tem"] else (
+            "falta a variável" + ("" if x["aplicavel"] else " (edite à mão: variável no env da chamada)"))
+        print(f"- {x['id']} — {st}" + ("" if x["situacao"] == "versionado" else f" [{x['situacao']}]"))
+        print(f"    {x['trecho']}")
+    faltam = [x["id"] for x in lst if not x["ja_tem"] and x["aplicavel"]]
+    if faltam:
+        print("Para incluir: status-projeto autonomo " + " ".join(f"--aplicar {f}" for f in faltam))
+
+
 def cmd_fatias_soltas(a):
     cfg = c.ler_config(a.raiz) or {}
     lst = fatias_fora_da_pasta(a.raiz, cfg)
@@ -441,6 +545,7 @@ def cmd_estado(a):
         "pastas_fatias_detectadas": pastas,
         "fatias_soltas_na_raiz": na_raiz,
         "dados_existentes": dados_existentes(raiz),
+        "chamadas_autonomas": chamadas_autonomas(raiz),
         "fatias_fora_da_pasta": fatias_fora_da_pasta(raiz, cfg),
         "hooks_manuais_antigos": hooks_manuais(raiz),
     }
@@ -1745,6 +1850,9 @@ def main():
     x.add_argument("--ajustar", action="append", metavar="TITULO=FASE",
                    help="troca uma seção fora do padrão pela fase padrão, juntando os itens (pode repetir)")
     x.add_argument("--marcar", action="store_true", help="marca a etapa status_md como feita")
+    x = s.add_parser("autonomo", help="scripts que chamam 'claude -p': confere/inclui STATUS_PROJETO_TIPO=autonomo")
+    x.add_argument("--json", action="store_true")
+    x.add_argument("--aplicar", action="append", metavar="ARQUIVO:LINHA", help="inclui a variável nessa chamada")
     x = s.add_parser("fatias-soltas", help="arquivos FATIA_* fora da pasta das fatias (versionados ou não)")
     x.add_argument("--json", action="store_true")
     x = s.add_parser("espalhado", help="lista status espalhado em outros arquivos")

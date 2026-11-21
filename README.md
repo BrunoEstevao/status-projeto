@@ -136,6 +136,8 @@ projetos o plugin não grava nada.
   da sessão. **30 minutos sem nenhum evento fecham a sessão** no último evento, então terminal esquecido aberto não conta.
 - **Tipos:** `interativo`; `autonomo` (`claude -p`, Agent SDK, `STATUS_PROJETO_TIPO=autonomo` ou um processo listado em
   `autonomo_processos` no config); `teste` ("vou testar" → "terminei o teste"); `planejamento` (modo plano ou "vou planejar").
+  Scripts do projeto que chamam `claude -p` (um supervisor, por exemplo) são achados na instalação, que oferece
+  incluir `STATUS_PROJETO_TIPO=autonomo` na chamada (`status-projeto autonomo`).
 - **Fatia** da sessão: a branch de trabalho, ou os itens em 🌐 do `STATUS.md`.
 - **Estimativa pelo git** (uma vez, na instalação): commits de todas as branches. Mais de 2 h entre commits abre uma
   sessão nova, e cada sessão ganha 30 min antes do primeiro commit. A fatia vem de `FATIA_<NOME>` na mensagem ou do

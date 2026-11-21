@@ -188,6 +188,17 @@ pergunte (AskUserQuestion): **Tirar os hooks antigos (Recomendado)** — motivo:
 no relatório" · **Manter**. Só edite com o sim. Se o hook antigo fizer mais coisa além de medir tempo, não recomende:
 diga que depende de o usuário ainda precisar dessa outra função e proponha tirar só a parte do tempo.
 
+## Passo 6b — scripts que rodam o Claude sozinho (`claude -p`)
+Rode `status-projeto autonomo` (ou leia `chamadas_autonomas` do `estado`). Ele lista as linhas de scripts (`.sh`,
+`.ps1`, `.bat`, `.js`, `.py`, `package.json`...) que chamam `claude -p`/`--print`, inclusive no PowerShell com o
+caminho numa variável (`Start-Process ... -ArgumentList "-p ..."`), e diz se a chamada já leva
+`STATUS_PROJETO_TIPO=autonomo`. Se alguma não leva, mostre a lista e pergunte (AskUserQuestion):
+**Incluir STATUS_PROJETO_TIPO=autonomo nessas chamadas (Recomendado)** — motivo: "assim o tempo desses scripts (ex.:
+um supervisor) entra no relatório como autônomo, e não como interativo" · **Escolher quais** · **Não mexer**.
+Sim → `status-projeto autonomo --aplicar ARQUIVO:LINHA [...]`. No shell, a variável vai antes do `claude`, ou com
+`env` depois de `exec`/`nohup`/`sudo`. No `.ps1`/`.bat`, entra uma linha antes da chamada. Em `.js`/`.py`/`.json`,
+edite você mesmo, pondo a variável no env da chamada. Mostre o `git diff` dos scripts e não faça commit.
+
 ## Passo 7 — etapas `gitattributes` e `gitignore`
 `status-projeto gitattributes`, depois `status-projeto gitignore` (ele já ignora sozinho a trava e o estado local,
 que é seguro). Se apontar arquivos do status que estão ignorados, mostre e pergunte (AskUserQuestion), a não ser que
