@@ -560,8 +560,16 @@ def itens_a_revisar(raiz):
     return out
 
 
+SEM_GITHUB = 4  # código de saída: não deu para saber DONO/REPO → o /instalar-status pergunta ao usuário
+
+
 def textos_claude_ai(raiz, cfg):
-    gh = c.remoto_github(raiz) or f"<dono>/{os.path.basename(raiz)}"
+    gh = c.remoto_github(raiz)
+    if not gh:
+        url = c.git(raiz, "remote", "get-url", c.nome_remoto(raiz)) if c.nome_remoto(raiz) else ""
+        sair("Não consegui saber o repositório no GitHub (DONO/REPO) pelo remote"
+             + (f" ({re.sub(r'//[^@/]+@', '//', url)})" if url else " (nenhum remote)") + ". Pergunte ao usuário e rode "
+             "`status-projeto github DONO/REPO`; depois rode este comando de novo.", SEM_GITHUB)
     usuario = cfg.get("usuario") or "o usuário"
     instrucoes = template("instrucoes-claude-ai.md", {"repo_github": gh, "usuario": usuario,
                                                       "pasta_fatias": cfg.get("pasta_fatias", "fatias")}).strip()
@@ -629,6 +637,8 @@ def diagnostico(raiz, cfg):
             falta.append(("gitignore", "regras do .gitignore mudaram"))
     if "guia" in et and not os.path.exists(os.path.join(raiz, c.GUIA)):
         falta.append(("guia", f"{c.GUIA} sumiu"))
+    if "guia" in et and "<dono>/" in ler(os.path.join(raiz, c.GUIA)):
+        falta.append(("guia", f"{c.GUIA} com <dono> no lugar do repo do GitHub (rode `status-projeto github` e o guia)"))
     if et.get("estimativa") not in (None, "sem historico") and not os.path.exists(os.path.join(raiz, c.CSV_ESTIMATIVA)):
         falta.append(("estimativa", "estimativa_git.csv sumiu (não é refeita; recupere pelo git)"))
     return falta
@@ -670,9 +680,32 @@ def cmd_atualizar(a):
         else:
             print("CLAUDE.md: bloco já em dia.")
     if os.path.exists(os.path.join(raiz, c.GUIA)):
-        escrever(os.path.join(raiz, c.GUIA), montar_guia(raiz, cfg))
-        print(f"{c.GUIA} regenerado.")
+        if c.remoto_github(raiz):
+            escrever(os.path.join(raiz, c.GUIA), montar_guia(raiz, cfg))
+            print(f"{c.GUIA} regenerado.")
+        else:
+            print(f"{c.GUIA} NÃO regenerado: falta DONO/REPO do GitHub (pergunte ao usuário e rode "
+                  "`status-projeto github DONO/REPO`, depois `status-projeto guia`).")
     print("STATUS.md, sessoes.csv e estimativa_git.csv não foram tocados.")
+
+
+def cmd_github(a):
+    """Mostra o DONO/REPO usado no guia; com argumento, grava no config (quando o remote não diz)."""
+    raiz = a.raiz
+    if not a.dono_repo:
+        gh = c.remoto_github(raiz)
+        if not gh:
+            textos_claude_ai(raiz, {})  # sai com SEM_GITHUB e a mensagem
+        print(gh)
+        return
+    cfg = precisa_config(raiz)
+    v = a.dono_repo.strip()
+    v = c.dono_repo_da_url(v) or v
+    if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", v):
+        sair("Formato esperado: DONO/REPO (ex.: BrunoEstevao/zapai).")
+    cfg["repo_github"] = v
+    c.gravar_config(raiz, cfg)
+    print(f"Repositório no GitHub gravado no config: {v}")
 
 
 def cmd_repos(a):
@@ -1150,14 +1183,19 @@ def cmd_verificar(a):
     gh = c.remoto_github(raiz)
     ok(gh, f"remote no GitHub ({gh or 'nenhum'})", "o claude.ai lê o repo pelo GitHub: crie o remote e faça push")
     if gh:
-        c.git(raiz, "fetch", "-q", "origin", timeout=30)
+        rn = c.nome_remoto(raiz) or "origin"
+        c.git(raiz, "fetch", "-q", rn, timeout=30)
         br = c.git(raiz, "rev-parse", "--abbrev-ref", "HEAD")
-        remoto = c.git(raiz, "show", f"origin/{br}:STATUS.md")
+        remoto = c.git(raiz, "show", f"{rn}/{br}:STATUS.md")
         local = ler(os.path.join(raiz, "STATUS.md"))
-        ok(remoto and remoto.strip() == local.strip(), f"STATUS.md igual no GitHub (origin/{br})",
+        ok(remoto and remoto.strip() == local.strip(), f"STATUS.md igual no GitHub ({rn}/{br})",
            "o claude.ai vai ler uma versão velha: commit e push do STATUS.md (só com 'pode commitar')")
     for b, t, d in res:
         print(("✅ " if b else "❌ ") + t + ("" if b or not d else f" — {d}"))
+    if not gh:
+        print("\nSem DONO/REPO do GitHub não há frase de teste: pergunte ao usuário e rode "
+              "`status-projeto github DONO/REPO`.")
+        sys.exit(2)
     _, instrucoes, frase = textos_claude_ai(raiz, cfg)
     print("\nPara testar no claude.ai (no projeto com o repo conectado), mande:\n")
     print(f"  {frase}\n")
@@ -1202,6 +1240,8 @@ def main():
     x = s.add_parser("reparar", help="lista o que falta ou quebrou")
     x.add_argument("--json", action="store_true")
     s.add_parser("atualizar", help="migra o config e atualiza o bloco do CLAUDE.md e o guia")
+    x = s.add_parser("github", help="mostra (ou grava) o DONO/REPO do GitHub usado no guia")
+    x.add_argument("dono_repo", nargs="?", default="")
     x = s.add_parser("repos", help="lista/adiciona/remove repos irmãos")
     x.add_argument("--adicionar", action="append")
     x.add_argument("--remover", action="append")

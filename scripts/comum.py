@@ -74,11 +74,38 @@ def n_commits(raiz):
     return int(out) if out.isdigit() else 0
 
 
+def dono_repo_da_url(url):
+    """'DONO/REPO' de uma URL de remote, com qualquer host: git@github.com:D/R.git, git@github-zapai:D/R.git
+    (apelido do ~/.ssh/config), https://github.com/D/R, ssh://git@host:22/D/R.git... Ou ''."""
+    url = (url or "").strip()
+    if url.lower().startswith("file:"):
+        return ""
+    m = re.match(r"^[a-z][a-z0-9+.-]*://[^/]+/(.+)$", url, re.I)  # esquema://[usuario@]host[:porta]/caminho
+    if not m:
+        m = re.match(r"^(?:[^@/\s]+@)?[^:/\s]+:/?(.+)$", url)    # [usuario@]host:caminho (estilo scp)
+    if not m:
+        return ""
+    partes = [x for x in m.group(1).strip("/").split("/") if x]
+    if len(partes) < 2:
+        return ""
+    dono, repo = partes[-2], re.sub(r"\.git$", "", partes[-1])
+    ok = re.compile(r"^[A-Za-z0-9_.-]+$")
+    return f"{dono}/{repo}" if repo and ok.match(dono) and ok.match(repo) else ""
+
+
+def nome_remoto(raiz):
+    """'origin' se existir; senão o primeiro remote do repo; ou ''."""
+    nomes = git(raiz, "remote").split()
+    return "origin" if "origin" in nomes else (nomes[0] if nomes else "")
+
+
 def remoto_github(raiz):
-    """'dono/repo' a partir do remote origin (GitHub), ou ''."""
-    url = git(raiz, "remote", "get-url", "origin")
-    m = re.search(r"github\.com[:/]+([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", url)
-    return f"{m.group(1)}/{m.group(2)}" if m else ""
+    """'dono/repo': o informado no config (`repo_github`) ou o lido do remote (qualquer host); ou ''."""
+    cfg = ler_config(raiz) or {}
+    if cfg.get("repo_github"):
+        return cfg["repo_github"]
+    nome = nome_remoto(raiz)
+    return dono_repo_da_url(git(raiz, "remote", "get-url", nome)) if nome else ""
 
 
 def branch_padrao(raiz):
@@ -101,6 +128,7 @@ def config_padrao():
         "usuario": "",
         "moeda": "R$",
         "valor_hora": [],
+        "repo_github": "",
         "pasta_fatias": "fatias",
         "pasta_fatias_executadas": "fatias_executadas",
         "projeto_novo": False,

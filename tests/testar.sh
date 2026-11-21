@@ -46,6 +46,7 @@ contagens() {
 
 echo "== 1. Repo vazio (projeto novo)"
 V="$BASE/vazio"; mkdir -p "$V"; git -C "$V" init -q -b main
+git -C "$V" remote add origin git@github-zapai:Dono-Teste/vazio.git   # apelido SSH do ~/.ssh/config
 instalar "$V"
 A1="$(assinatura "$V")"; C1="$(contagens "$V")"
 echo "  -- 2ª instalação (precisa não mudar nada):"
@@ -56,9 +57,11 @@ checa "estimativa: sem histórico (nada a estimar)" "grep -q 'sem historico' $V/
 checa "contagens iguais nas duas rodadas ($C2)" "[ \"$C1\" = \"$C2\" ] && [ \"$C2\" = 'blocos=1 union=1 gi=1 fases=5' ]"
 checa "nenhum arquivo mudou na 2ª rodada" '[ "$A1" = "$A2" ]'
 checa "instalação completa" "$SP --raiz $V reparar | grep -q 'Nada faltando'"
+checa "remote com apelido SSH vira Dono-Teste/vazio no guia" "grep -q 'Dono-Teste/vazio' $V/docs/COMO_USAR_STATUS.md && ! grep -q '<dono>' $V/docs/COMO_USAR_STATUS.md"
 
 echo "== 2. Repo com histórico"
 H="$BASE/historico"; mkdir -p "$H"; git -C "$H" init -q -b main
+git -C "$H" remote add origin https://github.com/Dono-Teste/historico.git
 cd "$H"
 mkdir -p fatias src
 printf '# Meu app\n' > README.md
@@ -207,6 +210,27 @@ $SP atualizar > /dev/null
 checa "atualizar migra config antigo sem perder dados" "python3 -c \"import json;d=json.load(open('.claude-status/config.json'));assert d['ocioso_min']==30 and d['usuario']=='Pessoa Teste' and len(d['valor_hora'])==2\""
 checa "atualizar não duplicou o bloco" "[ \$(grep -c 'status-projeto:inicio' CLAUDE.md) = 1 ]"
 cd - > /dev/null
+
+echo "== 6. Remote: qualquer host antes dos dois-pontos; sem DONO/REPO, pergunta (nunca escreve <dono>)"
+checa "formatos de URL do remote" "python3 -I - '$PLUGIN/scripts' <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import comum as c
+casos = {'git@github-zapai:BrunoEstevao/zapai.git': 'BrunoEstevao/zapai', 'git@github.com:D/R.git': 'D/R',
+         'github-x:D/R': 'D/R', 'https://github.com/D/R': 'D/R', 'https://u:t@github.com/D/R.git/': 'D/R',
+         'ssh://git@github-x:22/D/R.git': 'D/R', '/srv/repo.git': '', 'host:sem-dono.git': '', '': ''}
+ruins = {u: c.dono_repo_da_url(u) for u, e in casos.items() if c.dono_repo_da_url(u) != e}
+print(ruins) if ruins else None; sys.exit(1 if ruins else 0)
+PY"
+R="$BASE/sem_remote"; rm -rf "$R"; mkdir -p "$R"; git -C "$R" init -q -b main
+git -C "$R" remote add upstream git@github-zapai:Dono-Teste/sem_remote.git   # sem origin: usa o único remote
+( cd "$R" && $SP init --usuario T --valor 150 > /dev/null )
+checa "sem origin, usa o outro remote" "[ \"\$($SP --raiz $R github)\" = Dono-Teste/sem_remote ]"
+git -C "$R" remote set-url upstream /srv/git/sem_remote.git
+( cd "$R" && $SP guia --marcar > /dev/null 2>&1 ); rc=$?
+checa "remote ilegível: guia sai com código 4 e não grava <dono>" "[ $rc = 4 ] && [ ! -e $R/docs/COMO_USAR_STATUS.md ]"
+$SP --raiz "$R" github Dono-Teste/manual > /dev/null
+( cd "$R" && $SP guia --marcar > /dev/null )
+checa "DONO/REPO informado vai para o guia" "grep -q 'Dono-Teste/manual' $R/docs/COMO_USAR_STATUS.md && ! grep -q '<dono>' $R/docs/COMO_USAR_STATUS.md"
+checa "formato inválido recusado" "! $SP --raiz $R github 'sem barra' 2>/dev/null"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

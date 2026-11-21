@@ -5,6 +5,17 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.0.1] — 2026-11-20
+### Corrigido
+- O remote com apelido SSH do `~/.ssh/config` (ex.: `git@github-zapai:Dono/repo.git`) não era reconhecido e o guia
+  saía com `<dono>/repo`. Agora qualquer host antes dos dois-pontos é aceito (e também `https://`, `ssh://` com porta
+  e credenciais na URL); sem `origin`, vale o único remote do repo.
+- Quando mesmo assim não dá para saber o `DONO/REPO`, o guia não é gravado com `<dono>`: o comando sai com código 4 e
+  o `/instalar-status` pergunta ao usuário. O `reparar` aponta guia antigo com `<dono>`.
+### Adicionado
+- `status-projeto github [DONO/REPO]`: mostra o repo detectado ou grava o informado (campo novo `repo_github` no
+  config, com valor padrão vazio — não exige reinstalar).
+
 ## [1.0.0] — 2026-11-20
 ### Adicionado
 - `/instalar-status`: instalação por etapas guardadas em `.claude-status/config.json` (continua de onde parou),
