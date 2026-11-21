@@ -36,7 +36,7 @@ Precisa de Claude Code 2.1 ou mais novo, `git` e `python3`.
 **1. Instale o plugin** (uma vez por computador). Dentro do Claude Code:
 
 ```
-/plugin marketplace add BrunoEstevao/claude-status
+/plugin marketplace add BrunoEstevao/status-projeto
 /plugin install status-projeto@status-projeto
 /reload-plugins
 ```
@@ -44,12 +44,12 @@ Precisa de Claude Code 2.1 ou mais novo, `git` e `python3`.
 Ou pelo terminal:
 
 ```bash
-claude plugin marketplace add BrunoEstevao/claude-status
+claude plugin marketplace add BrunoEstevao/status-projeto
 claude plugin install status-projeto@status-projeto
 ```
 
 (Para testar a partir de uma pasta local:
-`/plugin marketplace add /caminho/para/claude-status`.)
+`/plugin marketplace add /caminho/para/status-projeto`.)
 
 **2. Instale no seu projeto.** Abra o Claude Code na pasta do projeto e rode:
 
