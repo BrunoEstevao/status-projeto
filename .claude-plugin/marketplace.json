@@ -1,0 +1,12 @@
+{
+  "name": "status-projeto",
+  "description": "Marketplace do plugin status-projeto: status do projeto no STATUS.md e horas medidas por hooks.",
+  "owner": { "name": "status-projeto" },
+  "plugins": [
+    {
+      "name": "status-projeto",
+      "source": "./",
+      "description": "Status do projeto num lugar só (STATUS.md) e tempo/custo medidos por hooks."
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Comandos do plugin status-projeto (o bin/ do plugin entra no PATH do Bash do Claude Code).
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../scripts/status_projeto.py" "$@"

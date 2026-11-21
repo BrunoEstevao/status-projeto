@@ -1,0 +1,1232 @@
+#!/usr/bin/env python3
+"""status-projeto — comandos usados pelas skills do plugin.
+
+Uso: status-projeto <comando> [opções]   (rode sem comando para ver a lista)
+Todos os comandos rodam na raiz do repositório principal da pasta atual (ou --raiz DIR).
+"""
+import argparse
+import collections
+import csv
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import comum as c  # noqa: E402
+
+TEMPLATES = os.path.join(c.RAIZ_PLUGIN, "templates")
+MARCA_INI = "<!-- status-projeto:inicio"
+MARCA_FIM = "<!-- status-projeto:fim -->"
+GI_INI = "# >>> status-projeto (não edite entre estas marcas)"
+GI_FIM = "# <<< status-projeto"
+GENERICOS = {
+    "deps", "dep", "ci", "cd", "docs", "doc", "chore", "build", "test", "tests", "release", "config", "readme",
+    "lint", "format", "style", "wip", "main", "core", "app", "api", "ui", "server", "client", "web", "status",
+    "infra", "deploy", "repo", "misc", "geral", "general", "changelog", "version", "versao", "types",
+}
+NOMES_STATUS = re.compile(r"(TODO|ROADMAP|PROGRESSO|PROGRESS|PENDENCIAS|BACKLOG|TASKS|TAREFAS|STATUS)[^/]*\.(md|txt)$", re.I)
+MARCAS_STATUS = re.compile(r"(^\s*[-*]\s*\[[ xX]\]|STATUS\s*:|\bem andamento\b|\bconclu[ií]d[oa]\b|\bpendente\b|"
+                           r"\bbloquead[oa]\b|\bin progress\b|\bdone\b|✅|🚧|⏳)", re.I)
+
+
+def sair(msg, codigo=1):
+    print(msg, file=sys.stderr)
+    sys.exit(codigo)
+
+
+def ler(caminho, padrao=""):
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return padrao
+
+
+def escrever(caminho, texto):
+    os.makedirs(os.path.dirname(caminho) or ".", exist_ok=True)
+    with open(caminho, "w", encoding="utf-8") as f:
+        f.write(texto)
+
+
+def template(nome, valores):
+    t = ler(os.path.join(TEMPLATES, nome))
+    for k, v in valores.items():
+        t = t.replace("{{" + k + "}}", str(v))
+    return t
+
+
+def precisa_config(raiz):
+    cfg = c.ler_config(raiz)
+    if cfg is None:
+        sair("Este repositório ainda não tem o status-projeto. Rode /instalar-status.")
+    return cfg
+
+
+def marcar(raiz, cfg, etapa, valor=None):
+    """Marca a etapa como feita; se já estava, mantém a data original (rodar de novo não muda nada)."""
+    et = cfg.setdefault("etapas", {})
+    if etapa in et and not valor:
+        return
+    et[etapa] = valor or c.agora_s()
+    c.gravar_config(raiz, cfg)
+
+
+# =================================================================== instalação
+
+def detectar_pastas_fatias(raiz):
+    achadas = []
+    for dirpath, dirnames, filenames in os.walk(raiz):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("node_modules", "vendor", "build",
+                                                                                  "dist", "target", "venv")]
+        rel = os.path.relpath(dirpath, raiz)
+        if rel.count(os.sep) > 2:
+            dirnames[:] = []
+            continue
+        base = os.path.basename(dirpath).lower()
+        n_fatias = sum(1 for f in filenames if re.match(r"(FATIA|SLICE)[_\-].*\.md$", f, re.I))
+        if rel != "." and (base in ("fatias", "slices", "fatia") or n_fatias >= 2):
+            if not base.endswith(("executadas", "concluidas", "done", "arquivadas")):
+                achadas.append({"pasta": rel, "arquivos_fatia": n_fatias})
+    na_raiz = sorted(f for f in os.listdir(raiz) if re.match(r"FATIA[_\-].*\.md$", f, re.I))
+    achadas.sort(key=lambda a: (-a["arquivos_fatia"], a["pasta"]))
+    return achadas, na_raiz
+
+
+def arquivos_versionados(raiz):
+    out = c.git(raiz, "ls-files")
+    if out:
+        return out.splitlines()
+    lst = []
+    for dirpath, dirnames, filenames in os.walk(raiz):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "node_modules"]
+        lst += [os.path.relpath(os.path.join(dirpath, f), raiz) for f in filenames]
+    return lst
+
+
+def status_espalhado(raiz, cfg=None):
+    ignorar = {"STATUS.md", "CHANGELOG.md", c.GUIA}
+    pf = (cfg or {}).get("pasta_fatias", "fatias")
+    achados = []
+    for rel in arquivos_versionados(raiz):
+        if rel in ignorar or not rel.lower().endswith((".md", ".txt")) or rel.startswith(c.PASTA_CFG):
+            continue
+        texto = ler(os.path.join(raiz, rel))
+        if not texto:
+            continue
+        linhas = [l.strip() for l in texto.splitlines() if MARCAS_STATUS.search(l)]
+        por_nome = bool(NOMES_STATUS.search(os.path.basename(rel)))
+        if por_nome or len(linhas) >= 3:
+            achados.append({"arquivo": rel, "linhas_com_status": len(linhas), "pelo_nome": por_nome,
+                            "fatia": rel.startswith(pf + "/"), "exemplos": [l[:100] for l in linhas[:3]]})
+    achados.sort(key=lambda a: (a["fatia"], not a["pelo_nome"], -a["linhas_com_status"]))
+    return achados
+
+
+def conflitos_claude_md(texto):
+    """Seções de status/tempo fora do bloco do plugin (instalação manual antiga)."""
+    fora = re.sub(re.escape(MARCA_INI) + r".*?" + re.escape(MARCA_FIM), "", texto, flags=re.S)
+    achou = []
+    for i, l in enumerate(fora.splitlines(), 1):
+        if re.match(r"^#{1,4}\s*(Regra(s)? de status|Tempo e custo|Status do projeto)\b", l, re.I):
+            achou.append(l.strip())
+    return achou
+
+
+def projeto_e_novo(raiz):
+    if c.n_commits(raiz) > 0:
+        return False
+    arquivos = [f for f in arquivos_versionados(raiz) if not re.match(
+        r"(README|LICENSE|\.gitignore|\.gitattributes|CLAUDE\.md|STATUS\.md|\.claude)", f, re.I)]
+    return len(arquivos) == 0
+
+
+def fases_faltando(raiz):
+    fases, presentes = c.ler_status_arquivo(raiz)
+    if fases is None:
+        return None
+    return [e for e, _ in c.FASES if e not in presentes]
+
+
+def cmd_estado(a):
+    raiz = a.raiz
+    cfg = c.ler_config(raiz)
+    pastas, na_raiz = detectar_pastas_fatias(raiz)
+    autores = collections.Counter(c.git(raiz, "log", "--all", "--format=%an").splitlines())
+    claude_md = ler(os.path.join(raiz, "CLAUDE.md"))
+    etapas = (cfg or {}).get("etapas", {})
+    pend = [e for e in c.ETAPAS if e not in etapas]
+    saida = {
+        "raiz": raiz,
+        "repo": os.path.basename(raiz),
+        "instalado": cfg is not None,
+        "instalacao_completa": cfg is not None and not pend,
+        "etapas_feitas": {e: etapas[e] for e in c.ETAPAS if e in etapas},
+        "etapas_pendentes": pend if cfg else c.ETAPAS,
+        "versao_plugin": c.versao_plugin(),
+        "versao_plugin_instalada": (cfg or {}).get("versao_plugin", ""),
+        "precisa_atualizar": bool(cfg) and (cfg.get("versao_plugin") != c.versao_plugin()),
+        "config": cfg,
+        "git": {
+            "repo_git": c.eh_repo_git(raiz),
+            "commits": c.n_commits(raiz),
+            "autores": autores.most_common(5),
+            "github": c.remoto_github(raiz),
+            "branch": c.git(raiz, "rev-parse", "--abbrev-ref", "HEAD"),
+        },
+        "projeto_novo": projeto_e_novo(raiz),
+        "status_md": {"existe": os.path.exists(os.path.join(raiz, "STATUS.md")),
+                      "fases_faltando": fases_faltando(raiz)},
+        "claude_md": {"existe": bool(claude_md), "tem_bloco": MARCA_INI in claude_md,
+                      "regras_antigas_fora_do_bloco": conflitos_claude_md(claude_md)},
+        "sessoes_csv": os.path.exists(os.path.join(raiz, c.CSV_SESSOES)),
+        "estimativa_git": os.path.exists(os.path.join(raiz, c.CSV_ESTIMATIVA)),
+        "pastas_fatias_detectadas": pastas,
+        "fatias_soltas_na_raiz": na_raiz,
+        "hooks_manuais_antigos": hooks_manuais(raiz),
+    }
+    print(json.dumps(saida, ensure_ascii=False, indent=2))
+
+
+def cmd_init(a):
+    raiz = a.raiz
+    cfg = c.ler_config(raiz)
+    if cfg is not None:
+        print("Config já existe; nada foi trocado (use /status-valor para mudar o valor da hora).")
+        return
+    if not a.usuario:
+        sair("Falta --usuario.")
+    cfg = c.config_padrao()
+    cfg.update({
+        "instalado_em": c.agora_s(),
+        "usuario": a.usuario.strip(),
+        "valor_hora": [{"desde": c.INICIO_DOS_TEMPOS, "valor": float(a.valor), "obs": "valor inicial"}],
+        "pasta_fatias": a.pasta_fatias.strip("/"),
+        "pasta_fatias_executadas": (a.pasta_executadas or a.pasta_fatias.strip("/") + "_executadas").strip("/"),
+        "projeto_novo": projeto_e_novo(raiz),
+        "autores_git": a.autor or [],
+        "repos": [{"nome": os.path.basename(os.path.normpath(r)), "caminho": r} for r in (a.repo or [])],
+    })
+    cfg["etapas"] = {"config": c.agora_s()}
+    c.gravar_config(raiz, cfg)
+    print(f"Config criado em {c.ARQ_CFG} (instalado em {cfg['instalado_em']}; o tempo daqui em diante é medido pelos hooks).")
+
+
+def cmd_status_md(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    p = os.path.join(raiz, "STATUS.md")
+    if a.vazio:
+        if os.path.exists(p):
+            print("STATUS.md já existe; não foi sobrescrito.")
+        else:
+            escrever(p, template("STATUS.md", {"projeto": os.path.basename(raiz), "data": c.agora().strftime("%d/%m/%Y"),
+                                               "usuario": cfg.get("usuario") or "o usuário"}))
+            print("STATUS.md criado com as 5 fases vazias.")
+    falta = fases_faltando(raiz)
+    if falta is None:
+        sair("STATUS.md não existe.")
+    if falta and a.completar_fases:
+        texto = ler(p).rstrip("\n") + "\n"
+        for e, nome in c.FASES:
+            if e in falta:
+                texto += f"\n## {e} {nome}\n(nada agora)\n"
+        escrever(p, texto)
+        print("Fases acrescentadas no fim do STATUS.md (nada existente foi mexido): " + " ".join(falta))
+        falta = []
+    if falta:
+        sair("STATUS.md sem as fases: " + " ".join(falta) + " (use --completar-fases para acrescentar só as que faltam)", 3)
+    fases, _ = c.ler_status_arquivo(raiz)
+    problemas = validar_status(fases)
+    for pr in problemas:
+        print("aviso: " + pr)
+    if a.marcar:
+        marcar(raiz, cfg, "status_md")
+    print("STATUS.md ok: " + ", ".join(f"{e} {len(fases[e])}" for e, _ in c.FASES))
+
+
+def validar_status(fases):
+    probs = []
+    if len(fases["🌐"]) > 3:
+        probs.append(f"{len(fases['🌐'])} itens em 🌐 (máximo 3)")
+    for it in fases["🌐"]:
+        sub = " ".join(it["sub"]).lower()
+        for campo in ("parei em", "próximo passo", "pendente"):
+            if campo not in sub:
+                probs.append(f"🌐 '{it['nome']}' sem '{campo.capitalize()}'")
+    for it in fases["📦"]:
+        if not it["tamanho"]:
+            probs.append(f"📦 '{it['nome']}' sem tamanho [P]/[M]/[G]")
+    for e, _ in c.FASES:
+        for it in fases[e]:
+            if not it["desde"]:
+                probs.append(f"{e} '{it['nome']}' sem '(desde DD/MM)'")
+    return probs
+
+
+def cmd_espalhado(a):
+    cfg = c.ler_config(a.raiz)
+    achados = status_espalhado(a.raiz, cfg)
+    if a.json:
+        print(json.dumps(achados, ensure_ascii=False, indent=2))
+        return
+    if not achados:
+        print("Nenhum outro arquivo com status encontrado.")
+        return
+    print("Arquivos que parecem guardar status (fora do STATUS.md):")
+    for x in achados:
+        tag = " [arquivo de fatia]" if x["fatia"] else ""
+        print(f"- {x['arquivo']}{tag}: {x['linhas_com_status']} linhas" + (" (nome de arquivo de status)" if x["pelo_nome"] else ""))
+        for e in x["exemplos"]:
+            print(f"    · {e}")
+
+
+# ------------------------------------------------------------------- estimativa pelo git
+
+def fatia_do_commit(assunto, corpo):
+    m = re.search(r"FATIA_[A-Za-z0-9_]+", assunto) or re.search(r"FATIA_[A-Za-z0-9_]+", corpo)
+    if m:
+        return m.group(0).rstrip("_")
+    m = re.match(r"^[a-z]+\(([^)]+)\)!?:", assunto)
+    if m and m.group(1).lower() not in GENERICOS and not re.fullmatch(r"\d+[a-z]?", m.group(1)):
+        return m.group(1)
+    return ""
+
+
+def estimar_git(raiz, corte, taxas, autores=None, gap_h=2.0, antes_min=30.0):
+    """Sessões estimadas pelo git log (todas as branches). Só o que veio antes de `corte` (datetime)."""
+    raw = c.git(raiz, "log", "--all", "--format=%H%x1f%at%x1f%an%x1f%ae%x1f%s%x1f%b%x1e", timeout=120)
+    vistos, commits = set(), []
+    filtro = [x.lower() for x in (autores or []) if x]
+    for reg in raw.split("\x1e"):
+        p = reg.strip("\n").split("\x1f")
+        if len(p) < 5 or p[0] in vistos:
+            continue
+        vistos.add(p[0])
+        if filtro and p[2].lower() not in filtro and p[3].lower() not in filtro:
+            continue
+        ts = int(p[1])
+        if corte and ts >= corte.timestamp():
+            continue
+        commits.append((ts, fatia_do_commit(p[4], p[5] if len(p) > 5 else "")))
+    commits.sort()
+    grupos, atual = [], []
+    for cm in commits:
+        if atual and cm[0] - atual[-1][0] > gap_h * 3600:
+            grupos.append(atual)
+            atual = []
+        atual.append(cm)
+    if atual:
+        grupos.append(atual)
+    linhas = []
+    for g in grupos:
+        ini = datetime.fromtimestamp(g[0][0] - antes_min * 60)
+        fim = datetime.fromtimestamp(g[-1][0])
+        if corte and fim > corte:
+            fim = corte
+        cont = collections.Counter(f for _, f in g if f)
+        fatia = " + ".join(n for n, _ in cont.most_common(2)) if cont else "(sem fatia)"
+        h = max(0.0, (fim - ini).total_seconds() / 3600)
+        t = c.taxa_em(taxas, ini)
+        linhas.append({"inicio": ini.strftime("%Y-%m-%d %H:%M"), "fim": fim.strftime("%Y-%m-%d %H:%M"),
+                       "horas": f"{h:.2f}", "fatia": fatia, "tipo": "interativo", "commits": len(g),
+                       "repo": os.path.basename(raiz), "valor_hora": f"{t:.2f}", "custo": f"{h * t:.2f}"})
+    return linhas, len(commits)
+
+
+def cmd_estimar(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    p = os.path.join(raiz, c.CSV_ESTIMATIVA)
+    if os.path.exists(p):
+        print(f"{c.CSV_ESTIMATIVA} já existe: a estimativa do git não é refeita (fica como foi gravada).")
+        if "estimativa" not in cfg.get("etapas", {}):
+            marcar(raiz, cfg, "estimativa")
+        return
+    if cfg.get("etapas", {}).get("estimativa") == "sem historico":
+        print("Estimativa já feita na instalação (não havia commits antes dela); não é refeita.")
+        return
+    if "estimativa" in cfg.get("etapas", {}):
+        sair(f"A estimativa já foi feita em {cfg['etapas']['estimativa']}, mas {c.CSV_ESTIMATIVA} sumiu. "
+             f"Não refaço: recupere do git (git log --all -- {c.CSV_ESTIMATIVA}).", 3)
+    if c.n_commits(raiz) == 0:
+        marcar(raiz, cfg, "estimativa", "sem historico")
+        print("Sem commits: não há horas anteriores à instalação para estimar.")
+        return
+    corte = c.para_dt(cfg.get("instalado_em")) or c.agora()
+    linhas, n = estimar_git(raiz, corte, c.taxas(cfg), cfg.get("autores_git"))
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=c.CAMPOS_EST)
+        w.writeheader()
+        w.writerows(linhas)
+    h = sum(float(l["horas"]) for l in linhas)
+    custo = sum(float(l["custo"]) for l in linhas)
+    marcar(raiz, cfg, "estimativa")
+    print(f"Estimado antes da instalação: {n} commits, {len(linhas)} sessões, {c.horas_txt(h)}, "
+          f"{c.dinheiro(custo, cfg['moeda'])} → {c.CSV_ESTIMATIVA}")
+
+
+# ------------------------------------------------------------------- CLAUDE.md, hooks, git
+
+def bloco_regras(cfg, raiz):
+    irmaos = [f"`{r.get('caminho')}`" for r in cfg.get("repos", []) if isinstance(r, dict)]
+    return template("regras-claude-md.md", {
+        "versao": c.versao_plugin(),
+        "usuario": cfg.get("usuario") or "o usuário",
+        "pasta_fatias": cfg.get("pasta_fatias", "fatias"),
+        "pasta_executadas": cfg.get("pasta_fatias_executadas", "fatias_executadas"),
+        "repos_irmaos": ("Repos irmãos deste projeto (contam para o limite de 3 em 🌐 e para o relatório com --todos): "
+                         + ", ".join(irmaos) + ".") if irmaos else
+                        "Este projeto tem um repo só (irmãos entram em `repos` no `.claude-status/config.json`).",
+    }).strip("\n")
+
+
+def cmd_claude_md(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    p = os.path.join(raiz, "CLAUDE.md")
+    texto = ler(p)
+    bloco = bloco_regras(cfg, raiz)
+    conflitos = conflitos_claude_md(texto)
+    if MARCA_INI in texto and MARCA_FIM in texto:
+        novo = re.sub(re.escape(MARCA_INI) + r".*?" + re.escape(MARCA_FIM), lambda _: bloco, texto, count=1, flags=re.S)
+        acao = "atualizado" if novo != texto else "já estava em dia"
+    else:
+        if conflitos and not a.mesmo_assim:
+            print("O CLAUDE.md já tem regras de status/tempo fora do bloco do plugin:")
+            for x in conflitos:
+                print(f"  {x}")
+            sair("Nada foi gravado. Pergunte ao usuário: tirar as seções antigas e usar o bloco do plugin, "
+                 "ou gravar o bloco mesmo assim (--mesmo-assim).", 3)
+        base = texto.rstrip("\n") if texto else f"# CLAUDE.md — {os.path.basename(raiz)}"
+        novo = base + "\n\n" + bloco + "\n"
+        acao = "acrescentado no fim" if texto else "criado"
+    if novo != texto:
+        escrever(p, novo)
+    if MARCA_INI not in novo or novo.count(MARCA_INI) != 1:
+        sair("Erro: bloco do plugin não ficou único no CLAUDE.md.")
+    marcar(raiz, cfg, "claude_md")
+    print(f"Regras no CLAUDE.md: {acao} (um bloco só, entre as marcas status-projeto).")
+
+
+def hooks_manuais(raiz):
+    achados = []
+    for rel in (".claude/settings.json", ".claude/settings.local.json"):
+        t = ler(os.path.join(raiz, rel))
+        if re.search(r"tempo-hook|tempo_hook|sessoes\.csv", t):
+            achados.append(rel)
+    return achados
+
+
+def fonte_marketplace():
+    """Como o usuário adicionou o marketplace deste plugin (para registrar no projeto)."""
+    nome_mk = "status-projeto"
+    try:
+        with open(os.path.join(c.RAIZ_PLUGIN, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
+            nome_mk = json.load(f).get("name", nome_mk)
+    except Exception:
+        pass
+    p = os.path.join(os.path.expanduser("~"), ".claude", "plugins", "known_marketplaces.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            conhecidos = json.load(f)
+    except Exception:
+        conhecidos = {}
+    ent = conhecidos.get(nome_mk)
+    return nome_mk, (ent or {}).get("source")
+
+
+def cmd_hooks(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    hooks_json = os.path.join(c.RAIZ_PLUGIN, "hooks", "hooks.json")
+    if not os.path.exists(hooks_json):
+        sair("hooks/hooks.json do plugin não encontrado.")
+    nome_mk, fonte = fonte_marketplace()
+    p = os.path.join(raiz, ".claude", "settings.json")
+    try:
+        sett = json.loads(ler(p, "{}") or "{}")
+    except ValueError:
+        sair(f"{p} não é um JSON válido; nada foi mexido.")
+    mudou = False
+    chave = f"status-projeto@{nome_mk}"
+    if fonte:
+        if sett.setdefault("enabledPlugins", {}).get(chave) is not True:
+            sett["enabledPlugins"][chave] = True
+            mudou = True
+        mks = sett.setdefault("extraKnownMarketplaces", {})
+        if mks.get(nome_mk, {}).get("source") != fonte:
+            mks[nome_mk] = {"source": fonte}
+            mudou = True
+    if mudou:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        escrever(p, json.dumps(sett, ensure_ascii=False, indent=2) + "\n")
+    print("Hooks de tempo: vêm do plugin (hooks/hooks.json): SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd.")
+    if fonte:
+        print(f".claude/settings.json: plugin {chave} " + ("registrado" if mudou else "já registrado")
+              + " (quem abrir o repo — inclusive no Claude Code na web — recebe o convite para instalar).")
+    else:
+        print("Aviso: o plugin não veio de um marketplace conhecido (ex.: --plugin-dir); "
+              ".claude/settings.json do projeto não foi mexido.")
+    velhos = hooks_manuais(raiz)
+    if velhos:
+        print("ATENÇÃO: há hooks de tempo manuais em " + ", ".join(velhos)
+              + " — com o plugin, eles contariam a mesma sessão duas vezes. Pergunte ao usuário se pode tirá-los.")
+    marcar(raiz, cfg, "hooks")
+
+
+def cmd_gitattributes(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    p = os.path.join(raiz, ".gitattributes")
+    texto = ler(p)
+    if re.search(r"^\s*/?docs/tempo/sessoes\.csv\s+.*\bmerge=union\b", texto, re.M):
+        print(".gitattributes já tem merge=union no sessoes.csv.")
+    else:
+        novo = (texto.rstrip("\n") + "\n\n" if texto.strip() else "")
+        novo += ("# status-projeto: cada sessão é uma linha; no merge, junta as linhas dos dois lados\n"
+                 "docs/tempo/sessoes.csv merge=union\n")
+        escrever(p, novo)
+        print(".gitattributes: merge=union no docs/tempo/sessoes.csv acrescentado.")
+    marcar(raiz, cfg, "gitattributes")
+
+
+DEVEM_ENTRAR = ["STATUS.md", "CLAUDE.md", ".gitattributes", c.ARQ_CFG, c.CSV_SESSOES, c.CSV_ESTIMATIVA, c.GUIA]
+DEVEM_SAIR = [os.path.join(c.PASTA_LOCAL, "estado.json"), c.CSV_SESSOES + ".lock", c.CSV_SESSOES + ".tmp"]
+
+
+def checar_gitignore(raiz):
+    if not c.eh_repo_git(raiz):
+        return [], []
+    def ignorado(rel):
+        return subprocess.run(["git", "-C", raiz, "check-ignore", "-q", "--no-index", rel]).returncode == 0
+    return [r for r in DEVEM_ENTRAR if ignorado(r)], [r for r in DEVEM_SAIR if not ignorado(r)]
+
+
+def gravar_bloco_gitignore(raiz, desfazer):
+    p = os.path.join(raiz, ".gitignore")
+    texto = ler(p)
+    texto = re.sub(r"\n?" + re.escape(GI_INI) + r".*?" + re.escape(GI_FIM) + r"\n?", "\n", texto, flags=re.S)
+    linhas = [GI_INI, f"{c.PASTA_LOCAL}/", "docs/tempo/*.lock", "docs/tempo/*.tmp"]
+    for r in desfazer:  # só funciona se a pasta-mãe não estiver ignorada inteira
+        partes = r.split("/")
+        for i in range(1, len(partes)):
+            linhas.append("!" + "/".join(partes[:i]) + "/")
+        linhas.append("!" + r)
+    linhas.append(GI_FIM)
+    unicas = list(dict.fromkeys(linhas))
+    novo = texto.rstrip("\n") + ("\n\n" if texto.strip() else "") + "\n".join(unicas) + "\n"
+    if novo != ler(p):
+        escrever(p, novo)
+        return True
+    return False
+
+
+def cmd_gitignore(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    entram, saem = checar_gitignore(raiz)
+    if saem or (entram and a.corrigir):
+        # Ignorar os arquivos locais é sempre seguro; tirar algo do ignore só com --corrigir (o usuário autorizou).
+        ja_desfeitos = [l[1:] for l in re.findall(r"^!.*$", ler(os.path.join(raiz, ".gitignore")), re.M)]
+        desfazer = entram if a.corrigir else [r for r in ja_desfeitos if r in DEVEM_ENTRAR]
+        if gravar_bloco_gitignore(raiz, desfazer):
+            print(".gitignore: bloco status-projeto gravado.")
+        entram, saem = checar_gitignore(raiz)
+    for r in entram:
+        print(f"PROBLEMA: {r} está no .gitignore (precisa ir para o git).")
+    for r in saem:
+        print(f"PROBLEMA: {r} não está no .gitignore (é arquivo local).")
+    if not entram and not saem:
+        print(".gitignore ok: STATUS.md, CLAUDE.md, docs/tempo/ e o config vão para o git; trava e estado local, não.")
+        marcar(raiz, cfg, "gitignore")
+    else:
+        sair("Para tirar esses arquivos do ignore: --corrigir (pergunte antes ao usuário; se uma pasta-mãe inteira "
+             "estiver ignorada, mostre a linha que precisa mudar).", 3)
+
+
+# ------------------------------------------------------------------- guia
+
+def itens_a_revisar(raiz):
+    out = []
+    for i, l in enumerate(ler(os.path.join(raiz, "STATUS.md")).splitlines(), 1):
+        if not l.lstrip().startswith("- "):
+            continue  # só itens (a legenda do arquivo também fala de "(?)")
+        if "(?)" in l or "(desde ?)" in l:
+            out.append(f"STATUS.md:{i} — {l.strip()[:110]}")
+    return out
+
+
+def textos_claude_ai(raiz, cfg):
+    gh = c.remoto_github(raiz) or f"<dono>/{os.path.basename(raiz)}"
+    usuario = cfg.get("usuario") or "o usuário"
+    instrucoes = template("instrucoes-claude-ai.md", {"repo_github": gh, "usuario": usuario,
+                                                      "pasta_fatias": cfg.get("pasta_fatias", "fatias")}).strip()
+    frase = f"Abre o repo {gh} e me diz o que tem no STATUS.md"
+    return gh, instrucoes, frase
+
+
+def montar_guia(raiz, cfg):
+    gh, instrucoes, frase = textos_claude_ai(raiz, cfg)
+    revisar = itens_a_revisar(raiz)
+    return template("COMO_USAR_STATUS.md", {
+        "projeto": os.path.basename(raiz),
+        "repo_github": gh,
+        "usuario": cfg.get("usuario") or "o usuário",
+        "valor": c.dinheiro(c.taxas(cfg)[-1][1], cfg.get("moeda", "R$")),
+        "pasta_fatias": cfg.get("pasta_fatias", "fatias"),
+        "pasta_executadas": cfg.get("pasta_fatias_executadas", "fatias_executadas"),
+        "instrucoes_claude_ai": "\n".join("    " + l for l in instrucoes.splitlines()),
+        "frase_teste": frase,
+        "itens_revisar": "\n".join(f"   - {x}" for x in revisar) if revisar else "   - nenhum item com (?) no STATUS.md.",
+        "versao": c.versao_plugin(),
+    })
+
+
+def cmd_guia(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    texto = montar_guia(raiz, cfg)
+    escrever(os.path.join(raiz, c.GUIA), texto)
+    if a.marcar:
+        marcar(raiz, cfg, "guia")
+    print(texto)
+
+
+# ------------------------------------------------------------------- atualizar / reparar / etapa / repos
+
+def cmd_etapa(a):
+    cfg = precisa_config(a.raiz)
+    if a.nome not in c.ETAPAS:
+        sair("Etapa desconhecida. Etapas: " + ", ".join(c.ETAPAS))
+    marcar(a.raiz, cfg, a.nome, a.valor)
+    print(f"Etapa '{a.nome}' marcada como feita.")
+
+
+def diagnostico(raiz, cfg):
+    """O que falta ou quebrou (sem mexer em nada)."""
+    falta = []
+    et = cfg.get("etapas", {})
+    for e in c.ETAPAS:
+        if e not in et:
+            falta.append((e, "etapa não concluída"))
+    if "status_md" in et:
+        f = fases_faltando(raiz)
+        if f is None:
+            falta.append(("status_md", "STATUS.md sumiu (restaure pelo git; não é recriado por cima)"))
+        elif f:
+            falta.append(("status_md", "STATUS.md sem as fases " + " ".join(f)))
+    if "claude_md" in et and MARCA_INI not in ler(os.path.join(raiz, "CLAUDE.md")):
+        falta.append(("claude_md", "bloco de regras sumiu do CLAUDE.md"))
+    if "gitattributes" in et and "merge=union" not in ler(os.path.join(raiz, ".gitattributes")):
+        falta.append(("gitattributes", "merge=union sumiu do .gitattributes"))
+    if "gitignore" in et:
+        e1, e2 = checar_gitignore(raiz)
+        if e1 or e2:
+            falta.append(("gitignore", "regras do .gitignore mudaram"))
+    if "guia" in et and not os.path.exists(os.path.join(raiz, c.GUIA)):
+        falta.append(("guia", f"{c.GUIA} sumiu"))
+    if et.get("estimativa") not in (None, "sem historico") and not os.path.exists(os.path.join(raiz, c.CSV_ESTIMATIVA)):
+        falta.append(("estimativa", "estimativa_git.csv sumiu (não é refeita; recupere pelo git)"))
+    return falta
+
+
+def cmd_reparar(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    cfg, mudou = c.migrar(cfg)
+    if mudou:
+        c.gravar_config(raiz, cfg)
+    falta = diagnostico(raiz, cfg)
+    if a.json:
+        print(json.dumps([{"etapa": e, "motivo": m} for e, m in falta], ensure_ascii=False))
+        return
+    if not falta:
+        print("Nada faltando: a instalação está completa.")
+        return
+    print("Falta ou quebrou:")
+    for e, m in falta:
+        print(f"- {e}: {m}")
+
+
+def cmd_atualizar(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    antes = cfg.get("versao_plugin", "?")
+    cfg, _ = c.migrar(cfg)
+    cfg["versao_plugin"] = c.versao_plugin()
+    c.gravar_config(raiz, cfg)
+    print(f"Config migrado ({antes} → {cfg['versao_plugin']}); nada foi apagado.")
+    texto = ler(os.path.join(raiz, "CLAUDE.md"))
+    if MARCA_INI in texto:
+        novo = re.sub(re.escape(MARCA_INI) + r".*?" + re.escape(MARCA_FIM), lambda _: bloco_regras(cfg, raiz), texto,
+                      count=1, flags=re.S)
+        if novo != texto:
+            escrever(os.path.join(raiz, "CLAUDE.md"), novo)
+            print("CLAUDE.md: bloco de regras atualizado (só o que está entre as marcas).")
+        else:
+            print("CLAUDE.md: bloco já em dia.")
+    if os.path.exists(os.path.join(raiz, c.GUIA)):
+        escrever(os.path.join(raiz, c.GUIA), montar_guia(raiz, cfg))
+        print(f"{c.GUIA} regenerado.")
+    print("STATUS.md, sessoes.csv e estimativa_git.csv não foram tocados.")
+
+
+def cmd_repos(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    lst = cfg.setdefault("repos", [])
+    for r in a.adicionar or []:
+        if not any(isinstance(x, dict) and x.get("caminho") == r for x in lst):
+            lst.append({"nome": os.path.basename(os.path.normpath(r)), "caminho": r})
+    for r in a.remover or []:
+        lst[:] = [x for x in lst if not (isinstance(x, dict) and (x.get("caminho") == r or x.get("nome") == r))]
+    if a.adicionar or a.remover:
+        c.gravar_config(raiz, cfg)
+    for nome, cam in c.repos_do_projeto(raiz, cfg):
+        inst = "instalado" if c.ler_config(cam) else "sem status-projeto (horas só pelo git)"
+        print(f"- {nome}: {cam} ({inst})")
+    faltando = [x.get("caminho") for x in lst if isinstance(x, dict)
+                and not os.path.isdir(os.path.normpath(os.path.join(raiz, x.get("caminho", ""))))]
+    for f in faltando:
+        print(f"- {f}: pasta não encontrada nesta máquina")
+
+
+# =================================================================== dados de horas
+
+class Bloco:
+    __slots__ = ("repo", "fonte", "tipo", "fatia", "ini", "fim", "h", "taxa")
+
+    def __init__(self, repo, fonte, tipo, fatia, ini, fim, taxa):
+        self.repo, self.fonte, self.tipo, self.fatia = repo, fonte, tipo, fatia
+        self.ini, self.fim, self.taxa = ini, fim, taxa
+        self.h = max(0.0, (fim - ini).total_seconds() / 3600)
+
+    @property
+    def custo(self):
+        return self.h * self.taxa
+
+
+def blocos_do_repo(nome, cam, cfg_principal):
+    """(blocos, info) de um repo: estimado pelo git + medido pelos hooks."""
+    cfg = c.ler_config(cam) or cfg_principal
+    txs = c.taxas(cfg)
+    blocos, info = [], {"repo": nome, "instalado": c.ler_config(cam) is not None, "n_commits_est": 0,
+                        "corte": None, "estimativa_gravada": False}
+    sess = c.ler_sessoes(os.path.join(cam, c.CSV_SESSOES))
+    agora = c.agora()
+    for l in sess:
+        ini = c.para_dt(l["inicio"])
+        fim = c.para_dt(l["fim"])
+        if ini is None:
+            continue
+        if fim is None:
+            continue  # teste ainda aberto: entra quando fechar
+        tipo = l["tipo"] if l["tipo"] in c.TIPOS else "interativo"
+        blocos.append(Bloco(nome, "hooks", tipo, l["fatia"], ini, min(fim, agora), c.taxa_em(txs, ini)))
+    est = c.ler_estimativa(os.path.join(cam, c.CSV_ESTIMATIVA))
+    if est is not None:
+        info["estimativa_gravada"] = True
+        for r in est:
+            ini, fim = c.para_dt(r.get("inicio")), c.para_dt(r.get("fim"))
+            if not ini or not fim:
+                continue
+            b = Bloco(nome, "git", r.get("tipo") or "interativo", r.get("fatia", ""), ini, fim,
+                      float(r.get("valor_hora") or c.taxa_em(txs, ini)))
+            if r.get("horas"):
+                b.h = float(r["horas"])
+            blocos.append(b)
+            info["n_commits_est"] += int(r.get("commits") or 0)
+        info["corte"] = c.para_dt(cfg.get("instalado_em")) if c.ler_config(cam) else None
+    else:
+        primeiros = [b.ini for b in blocos if b.fonte == "hooks" and b.tipo != "teste"]
+        corte = c.para_dt(c.ler_config(cam).get("instalado_em")) if c.ler_config(cam) else (min(primeiros) if primeiros else None)
+        linhas, n = estimar_git(cam, corte, txs, cfg.get("autores_git"))
+        info["n_commits_est"], info["corte"] = n, corte
+        for r in linhas:
+            b = Bloco(nome, "git", "interativo", r["fatia"], c.para_dt(r["inicio"]), c.para_dt(r["fim"]),
+                      float(r["valor_hora"]))
+            b.h = float(r["horas"])
+            blocos.append(b)
+    return blocos, info
+
+
+def coletar(raiz, cfg, todos=False, extras=None):
+    repos = c.repos_do_projeto(raiz, cfg) if todos else [(os.path.basename(raiz), raiz)]
+    for e in extras or []:
+        cam = c.raiz_principal(e)
+        if all(cam != x[1] for x in repos):
+            repos.append((os.path.basename(cam), cam))
+    blocos, infos = [], []
+    for nome, cam in repos:
+        b, i = blocos_do_repo(nome, cam, cfg)
+        blocos += b
+        infos.append(i)
+    return blocos, infos
+
+
+def uniao(blocos, txs):
+    """Horas e custo de relógio, sem contar duas vezes o tempo simultâneo."""
+    ivs = sorted((b.ini, b.ini + timedelta(hours=b.h)) for b in blocos if b.h > 0)
+    h = custo = 0.0
+    fim_ate = None
+    for a, b in ivs:
+        if fim_ate is None or a >= fim_ate:
+            seg_ini, seg_fim = a, b
+        elif b > fim_ate:
+            seg_ini, seg_fim = fim_ate, b
+        else:
+            continue
+        dh = (seg_fim - seg_ini).total_seconds() / 3600
+        h += dh
+        custo += dh * c.taxa_em(txs, seg_ini)
+        fim_ate = seg_fim if fim_ate is None else max(fim_ate, seg_fim)
+    return h, custo
+
+
+def soma(blocos):
+    return sum(b.h for b in blocos), sum(b.custo for b in blocos)
+
+
+def por_fatia(blocos):
+    """{nome: {'git': h, 'hooks': h, 'custo': x, 'ini': dt, 'fim': dt, 'tipos': {tipo: h}}}; 'A + B' divide igual."""
+    d = {}
+    for b in blocos:
+        nomes = [n.strip() for n in (b.fatia or "").split(" + ") if n.strip()] or ["(sem fatia)"]
+        for n in nomes:
+            chave = next((k for k in d if c.mesma_fatia(k, n)), n)
+            x = d.setdefault(chave, {"git": 0.0, "hooks": 0.0, "custo": 0.0, "ini": b.ini, "fim": b.ini,
+                                     "tipos": collections.Counter(), "repos": set()})
+            parte = b.h / len(nomes)
+            x[b.fonte] += parte
+            x["custo"] += b.custo / len(nomes)
+            x["tipos"][b.tipo] += parte
+            x["ini"] = min(x["ini"], b.ini)
+            x["fim"] = max(x["fim"], b.ini + timedelta(hours=b.h))
+            x["repos"].add(b.repo)
+    return d
+
+
+def fase_de(nome, fases_por_repo):
+    for repo, fases in fases_por_repo.items():
+        if not fases:
+            continue
+        for e, _ in c.FASES:
+            for it in fases[e]:
+                if c.mesma_fatia(nome, it["nome"]):
+                    return e, it
+    return "", None
+
+
+def linha_h(rotulo, h, custo, moeda, largura=26):
+    print(f"  {rotulo:<{largura}} {c.horas_txt(h):>10}   {c.dinheiro(custo, moeda):>16}   {c.dias_txt(h):>6} dias de 8h")
+
+
+# =================================================================== relatórios
+
+def cmd_relatorio(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    moeda = cfg.get("moeda", "R$")
+    txs = c.taxas(cfg)
+    blocos, infos = coletar(raiz, cfg, a.todos, a.repo)
+    repos = [i["repo"] for i in infos]
+    if len(repos) > 1:
+        print(f"Horas e custo — projeto com os repos: {', '.join(repos)}")
+    else:
+        irmaos = len(c.repos_do_projeto(raiz, cfg)) - 1
+        print(f"Horas e custo — só o repo {repos[0]}" + (f" (para somar os {irmaos} irmãos: --todos)" if irmaos else ""))
+    print("  valor da hora: " + "; ".join(f"{c.dinheiro(v, moeda)}/h desde {c.data_br(d)}" for d, v in txs)
+          + " (cada sessão usa o valor vigente quando começou)")
+
+    git_b = [b for b in blocos if b.fonte == "git"]
+    hk = [b for b in blocos if b.fonte == "hooks"]
+    cortes = ", ".join(f"{i['repo']} até {c.data_br(i['corte'].strftime(c.FMT))}" for i in infos if i["corte"])
+    print(f"\nEstimado pelo git — antes da instalação{(' (' + cortes + ')') if cortes else ''}")
+    print(f"  {sum(i['n_commits_est'] for i in infos)} commits, {len(git_b)} sessões "
+          "(mais de 2 h entre commits = sessão nova; +30 min antes do 1º commit). É estimativa.")
+    if len(repos) > 1:
+        for r in repos:
+            linha_h(r, *soma([b for b in git_b if b.repo == r]), moeda)
+    linha_h("subtotal estimado", *soma(git_b), moeda)
+
+    print("\nMedido pelos hooks — depois da instalação (docs/tempo/sessoes.csv)")
+    for t in ("interativo", "autonomo", "planejamento", "teste"):
+        linha_h(c.NOME_TIPO[t], *soma([b for b in hk if b.tipo == t]), moeda)
+    if len(repos) > 1:
+        for r in repos:
+            linha_h(f"  {r}", *soma([b for b in hk if b.repo == r]), moeda)
+    linha_h("subtotal medido", *soma(hk), moeda)
+
+    print("\nTotal (estimado + medido)")
+    for t, rot in (("interativo", "codando interativo"), ("autonomo", "codando autônomo"),
+                   ("planejamento", "planejamento"), ("teste", "testando")):
+        linha_h(rot, *soma([b for b in blocos if b.tipo == t]), moeda)
+    th, tc = soma(blocos)
+    linha_h("TOTAL", th, tc, moeda)
+    uh, uc = uniao(blocos, txs)
+    if th - uh > 0.05:
+        print(f"  descontando sobreposição (sessões ou repos ao mesmo tempo): {c.horas_txt(uh)} de relógio, "
+              f"{c.dinheiro(uc, moeda)} — {c.horas_txt(th - uh)} eram simultâneas")
+
+    fases_por_repo = {}
+    for nome, cam in (c.repos_do_projeto(raiz, cfg) if a.todos else [(os.path.basename(raiz), raiz)]):
+        fases_por_repo[nome], _ = c.ler_status_arquivo(cam)
+    pf = por_fatia(blocos)
+    if pf:
+        print("\nPor fatia (estimado | medido | total | custo | fase)")
+        for nome, x in sorted(pf.items(), key=lambda kv: -(kv[1]["git"] + kv[1]["hooks"])):
+            if x["git"] + x["hooks"] < 0.01:
+                continue
+            e, it = fase_de(nome, fases_por_repo)
+            tam = f"[{it['tamanho']}] " if it and it.get("tamanho") else ""
+            print(f"  {(tam + nome)[:40]:<40} {c.horas_txt(x['git']):>9} {c.horas_txt(x['hooks']):>9} "
+                  f"{c.horas_txt(x['git'] + x['hooks']):>9} {c.dinheiro(x['custo'], moeda):>14}  {e}")
+        print("  (sessão com duas fatias 'A + B' divide as horas igualmente entre elas)")
+
+
+def cmd_valor(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    moeda = cfg.get("moeda", "R$")
+    try:
+        valor = float(str(a.valor).replace("R$", "").replace(".", "").replace(",", ".")) if "," in str(a.valor) \
+            else float(str(a.valor).replace("R$", ""))
+    except ValueError:
+        sair("Valor inválido. Exemplo: status-projeto valor 180")
+    if valor <= 0:
+        sair("O valor precisa ser maior que zero.")
+    desde = c.agora()
+    if a.desde:
+        d = c.para_dt(a.desde) or (c.data_do_desde(a.desde) if "/" in a.desde else None)
+        if not d:
+            sair("Data inválida (use AAAA-MM-DD ou DD/MM/AAAA).")
+        if d < desde.replace(hour=0, minute=0, second=0) or d < c.para_dt(c.taxas(cfg)[-1][0]):
+            sair("Sem efeito retroativo: a data precisa ser hoje ou depois (e depois do último valor).")
+        desde = max(d, desde) if d.date() == desde.date() else d
+    atual = c.taxa_em(cfg, desde)
+    cfg["valor_hora"].append({"desde": desde.strftime(c.FMT), "valor": valor, "obs": a.obs or ""})
+    c.gravar_config(raiz, cfg)
+    print(f"Valor da hora: {c.dinheiro(atual, moeda)} → {c.dinheiro(valor, moeda)} a partir de {c.data_br(desde.strftime(c.FMT))}.")
+    print("Sessões anteriores continuam com o valor da época (estimativa do git grava o valor de cada sessão).")
+    print("Histórico: " + "; ".join(f"{c.dinheiro(v, moeda)} desde {c.data_br(d)}" for d, v in c.taxas(cfg)))
+
+
+def cmd_historico(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    moeda = cfg.get("moeda", "R$")
+    blocos, infos = coletar(raiz, cfg, a.todos)
+    fases_por_repo = {nome: c.ler_status_arquivo(cam)[0]
+                      for nome, cam in (c.repos_do_projeto(raiz, cfg) if a.todos else [(os.path.basename(raiz), raiz)])}
+    pf = por_fatia(blocos)
+    # Itens do STATUS.md que ainda não têm horas também entram na linha do tempo.
+    for repo, fases in fases_por_repo.items():
+        if not fases:
+            continue
+        for e, _ in c.FASES:
+            for it in fases[e]:
+                if not any(c.mesma_fatia(k, it["nome"]) for k in pf):
+                    dt = c.data_do_desde(it["desde"])
+                    pf[it["nome"]] = {"git": 0.0, "hooks": 0.0, "custo": 0.0, "ini": dt, "fim": dt,
+                                      "tipos": collections.Counter(), "repos": {repo}, "_sem_horas": True}
+    print("Linha do tempo das fatias (primeira → última sessão | horas | custo | fase atual)\n")
+    total_h = total_c = 0.0
+    for nome, x in sorted(pf.items(), key=lambda kv: (kv[1]["ini"] or datetime.max)):
+        e, it = fase_de(nome, fases_por_repo)
+        h = x["git"] + x["hooks"]
+        total_h += h
+        total_c += x["custo"]
+        periodo = f"{c.ddmm(x['ini'])} → {c.ddmm(x['fim'])}" if not x.get("_sem_horas") else "sem horas      "
+        fase_txt = f"{e} desde {it['desde']}" if it and it["desde"] else e or "(fora do STATUS.md)"
+        tam = f"[{it['tamanho']}] " if it and it.get("tamanho") else ""
+        fonte = "medido" if x["hooks"] and not x["git"] else "estimado" if x["git"] and not x["hooks"] else \
+            "est.+med." if h else ""
+        repos = f" ({', '.join(sorted(x['repos']))})" if a.todos else ""
+        print(f"  {periodo:<15} {(tam + nome)[:42]:<42} {c.horas_txt(h):>9} {c.dinheiro(x['custo'], moeda):>14}"
+              f"  {fase_txt}  {fonte}{repos}")
+    print(f"\n  Total: {c.horas_txt(total_h)} · {c.dinheiro(total_c, moeda)} · {c.dias_txt(total_h)} dias de 8h")
+
+
+def cmd_cronograma(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    moeda = cfg.get("moeda", "R$")
+    fases, _ = c.ler_status_arquivo(raiz)
+    if not fases:
+        sair("STATUS.md não encontrado.")
+    blocos, _ = coletar(raiz, cfg, True)
+    pf = por_fatia(blocos)
+    amostras = {"P": [], "M": [], "G": []}
+    for it in fases["✅"]:
+        if not it["tamanho"]:
+            continue
+        x = next((v for k, v in pf.items() if c.mesma_fatia(k, it["nome"])), None)
+        if x and x["git"] + x["hooks"] > 0:
+            amostras[it["tamanho"]].append((x["git"] + x["hooks"], x["hooks"] > 0 and x["git"] == 0))
+    media, avisos = {}, []
+    for t, lst in amostras.items():
+        medidas = [h for h, med in lst if med]
+        if lst:
+            media[t] = sum(h for h, _ in lst) / len(lst)
+        else:
+            media[t] = c.PADRAO_TAMANHO_H[t]
+        if not lst:
+            avisos.append(f"[{t}] sem nenhuma fatia concluída com horas: uso {c.horas_txt(media[t])} (padrão).")
+        elif len(medidas) < 3:
+            avisos.append(f"[{t}] média de {len(lst)} fatia(s), só {len(medidas)} medida(s) pelos hooks "
+                          "(o resto é estimativa do git): pouco dado medido, trate como palpite.")
+    # Ritmo: horas por dia corrido nos últimos 28 dias (mín. 1 h/dia); sem dado, horas_dia em dias úteis.
+    agora = c.agora()
+    recentes = [b for b in blocos if b.ini >= agora - timedelta(days=28)]
+    hdia = sum(b.h for b in recentes) / 28 if recentes else 0
+    ritmo_txt = f"{hdia:.1f} h por dia corrido (média dos últimos 28 dias)" if hdia >= 1 else \
+        f"{cfg.get('horas_dia', 8)} h por dia útil (sem ritmo recente medido)"
+    print(f"Cronograma das fatias em 📦 (na ordem do STATUS.md) — ritmo: {ritmo_txt}")
+    print("  médias por tamanho (fatias ✅): " + ", ".join(
+        f"[{t}] {c.horas_txt(media[t])} ({len(amostras[t])} fatia(s))" for t in "PMG"))
+    acum = 0.0
+    data = agora
+    for it in fases["📦"]:
+        t = it["tamanho"]
+        h = media.get(t, c.PADRAO_TAMANHO_H["M"])
+        acum += h
+        if hdia >= 1:
+            data = agora + timedelta(days=acum / hdia)
+        else:
+            dias = acum / float(cfg.get("horas_dia", 8))
+            data, n = agora, 0
+            while n < dias:
+                data += timedelta(days=1)
+                if data.weekday() < 5:
+                    n += 1
+        custo = h * c.taxa_em(cfg, agora)
+        sem = "" if t else " (sem tamanho: contei como [M])"
+        print(f"  {('[' + t + '] ' if t else '') + it['nome']:<45} {c.horas_txt(h):>9} {c.dinheiro(custo, moeda):>13}"
+              f"   acumulado {c.horas_txt(acum):>9} → por volta de {data:%d/%m/%Y}{sem}")
+    if not fases["📦"]:
+        print("  (nenhuma fatia em 📦)")
+    print(f"\n  Total em 📦: {c.horas_txt(acum)} · {c.dias_txt(acum)} dias de 8h · "
+          f"{c.dinheiro(acum * c.taxa_em(cfg, agora), moeda)}")
+    for av in avisos:
+        print("  AVISO: " + av)
+
+
+def status_em(raiz, quando):
+    """Texto do STATUS.md commitado antes de `quando`."""
+    h = c.git(raiz, "rev-list", "-1", f"--before={quando.strftime(c.FMT)}", "HEAD", "--", "STATUS.md")
+    return c.git(raiz, "show", f"{h}:STATUS.md") if h else ""
+
+
+def cmd_resumo(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    moeda = cfg.get("moeda", "R$")
+    agora = c.agora()
+    ini = (agora - timedelta(days=a.dias)).replace(hour=0, minute=0, second=0)
+    fases, _ = c.ler_status_arquivo(raiz)
+    if not fases:
+        sair("STATUS.md não encontrado.")
+    antigo_txt = status_em(raiz, ini)
+    antigas = c.ler_status(antigo_txt)[0] if antigo_txt else None
+    print(f"O que mudou desde {ini:%d/%m} ({a.dias} dias), por fase\n")
+    algo = False
+    for e, nome in c.FASES:
+        entrou = [it for it in fases[e] if (c.data_do_desde(it["desde"]) or datetime.min) >= ini]
+        if antigas:
+            entrou += [it for it in fases[e] if it not in entrou and not any(
+                c.mesma_fatia(it["nome"], x["nome"]) for x in antigas[e])]
+            saiu = [x for x in antigas[e] if not any(c.mesma_fatia(x["nome"], it["nome"]) for it in fases[e])]
+        else:
+            saiu = []
+        if not entrou and not saiu:
+            continue
+        algo = True
+        print(f"{e} {nome}")
+        for it in entrou:
+            print(f"  + {it['texto'][:120]}")
+            for s in it["sub"]:
+                if re.match(r"(parei em|próximo passo|pendente)", s.lstrip("- ").lower()):
+                    print(f"      {s[:120]}")
+        for x in saiu:
+            destino = fase_de(x["nome"], {"r": fases})[0]
+            print(f"  − {x['nome']}" + (f" (foi para {destino})" if destino else " (saiu do STATUS.md)"))
+    if not algo:
+        print("  Nada mudou no STATUS.md nesse período.")
+    blocos, _ = coletar(raiz, cfg)
+    rec = [b for b in blocos if b.ini >= ini]
+    if rec:
+        h, cu = soma(rec)
+        print(f"\nHoras no período: {c.horas_txt(h)} ({c.dinheiro(cu, moeda)}) — "
+              + ", ".join(f"{c.NOME_TIPO[t]} {c.horas_txt(soma([b for b in rec if b.tipo == t])[0])}"
+                          for t in c.TIPOS if any(b.tipo == t for b in rec)))
+    if not antigas:
+        print("\n(sem versão do STATUS.md no git de antes do período: comparei só pelas datas \"(desde DD/MM)\")")
+
+
+def cmd_ajuda(a):
+    raiz = a.raiz
+    cfg = c.ler_config(raiz)
+    if cfg is None:
+        print("Este repositório ainda não tem o status-projeto. Rode /instalar-status.\n")
+        print(ler(os.path.join(TEMPLATES, "AJUDA_CURTA.md")))
+        return
+    moeda = cfg.get("moeda", "R$")
+    fases, _ = c.ler_status_arquivo(raiz)
+    print(f"Projeto {os.path.basename(raiz)} — estado agora\n")
+    if fases:
+        for e, nome in c.FASES:
+            print(f"  {e} {nome}: {len(fases[e])}")
+        for it in fases["🌐"]:
+            print(f"\n  🌐 {it['texto'][:110]}")
+            for s in it["sub"]:
+                print(f"     {s[:110]}")
+        if fases["📦"]:
+            print(f"\n  Próxima fatia (primeira de 📦): {fases['📦'][0]['texto'][:110]}")
+        for pr in validar_status(fases):
+            print(f"  aviso: {pr}")
+    else:
+        print("  STATUS.md não encontrado.")
+    sess = c.ler_sessoes(os.path.join(raiz, c.CSV_SESSOES))
+    teste = next((l for l in sess if l["tipo"] == "teste" and l["estado"] != "fechada"), None)
+    if teste:
+        print(f"\n  Teste aberto desde {c.data_br(teste['inicio'])}: {teste['fatia']} (diga 'terminei o teste às HH:MM')")
+    blocos, _ = coletar(raiz, cfg)
+    sem = [b for b in blocos if b.ini >= c.agora() - timedelta(days=7)]
+    h, cu = soma(sem)
+    print(f"\n  Últimos 7 dias: {c.horas_txt(h)} ({c.dinheiro(cu, moeda)}). Valor da hora: "
+          f"{c.dinheiro(c.taxas(cfg)[-1][1], moeda)}.")
+    falta = diagnostico(raiz, cfg)
+    if falta:
+        print("  Instalação: falta " + "; ".join(f"{e} ({m})" for e, m in falta) + " → /instalar-status")
+    print("\n" + "-" * 70 + "\n")
+    print(ler(os.path.join(raiz, c.GUIA)) or montar_guia(raiz, cfg))
+
+
+def cmd_verificar(a):
+    raiz = a.raiz
+    cfg = c.ler_config(raiz)
+    res = []
+
+    def ok(cond, txt, dica=""):
+        res.append((bool(cond), txt, dica))
+
+    ok(cfg is not None, "config .claude-status/config.json", "rode /instalar-status")
+    if cfg is None:
+        for b, t, d in res:
+            print(("✅ " if b else "❌ ") + t + ("" if b else f" — {d}"))
+        sys.exit(1)
+    falta = diagnostico(raiz, cfg)
+    ok(not falta, "instalação completa", "; ".join(f"{e}: {m}" for e, m in falta))
+    f = fases_faltando(raiz)
+    ok(f == [], "STATUS.md com as 5 fases", "faltam " + " ".join(f or []) if f else "STATUS.md não existe")
+    fases, _ = c.ler_status_arquivo(raiz)
+    if fases:
+        probs = validar_status(fases)
+        ok(not probs, "STATUS.md segue as regras (🌐 ≤ 3, Parei em/Próximo passo/Pendente, tamanho, datas)",
+           "; ".join(probs[:5]))
+        total = sum(len(c.fatias_codando(cam)) for _, cam in c.repos_do_projeto(raiz, cfg))
+        ok(total <= 3, f"🌐 somando os repos do projeto: {total} (máx. 3)", "tire itens de 🌐")
+    texto = ler(os.path.join(raiz, "CLAUDE.md"))
+    ok(texto.count(MARCA_INI) == 1, "regras no CLAUDE.md (um bloco só)", "rode /instalar-status → reparar")
+    ok(not conflitos_claude_md(texto), "sem regras de status duplicadas fora do bloco",
+       "; ".join(conflitos_claude_md(texto)))
+    ok(os.path.exists(os.path.join(c.RAIZ_PLUGIN, "hooks", "hooks.json")), "hooks do plugin presentes")
+    sess = c.ler_sessoes(os.path.join(raiz, c.CSV_SESSOES))
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    recente = [l for l in sess if (c.para_dt(l["fim"]) or datetime.min) >= c.agora() - timedelta(minutes=15)]
+    ok(any(l["sessao"] == sid for l in sess) if sid else bool(recente),
+       "hooks gravando esta sessão em docs/tempo/sessoes.csv",
+       "o plugin está ativo? (/plugin → status-projeto habilitado; depois /reload-plugins)")
+    ok(not hooks_manuais(raiz), "sem hooks de tempo manuais duplicados", ", ".join(hooks_manuais(raiz)))
+    ok(re.search(r"docs/tempo/sessoes\.csv\s+.*merge=union", ler(os.path.join(raiz, ".gitattributes"))),
+       ".gitattributes com merge=union no sessoes.csv")
+    e1, e2 = checar_gitignore(raiz)
+    ok(not e1 and not e2, ".gitignore certo", "; ".join([f"{x} ignorado" for x in e1] + [f"{x} não ignorado" for x in e2]))
+    ok(os.path.exists(os.path.join(raiz, c.GUIA)), f"guia {c.GUIA}")
+    gh = c.remoto_github(raiz)
+    ok(gh, f"remote no GitHub ({gh or 'nenhum'})", "o claude.ai lê o repo pelo GitHub: crie o remote e faça push")
+    if gh:
+        c.git(raiz, "fetch", "-q", "origin", timeout=30)
+        br = c.git(raiz, "rev-parse", "--abbrev-ref", "HEAD")
+        remoto = c.git(raiz, "show", f"origin/{br}:STATUS.md")
+        local = ler(os.path.join(raiz, "STATUS.md"))
+        ok(remoto and remoto.strip() == local.strip(), f"STATUS.md igual no GitHub (origin/{br})",
+           "o claude.ai vai ler uma versão velha: commit e push do STATUS.md (só com 'pode commitar')")
+    for b, t, d in res:
+        print(("✅ " if b else "❌ ") + t + ("" if b or not d else f" — {d}"))
+    _, instrucoes, frase = textos_claude_ai(raiz, cfg)
+    print("\nPara testar no claude.ai (no projeto com o repo conectado), mande:\n")
+    print(f"  {frase}\n")
+    print("Resposta certa: os mesmos itens que estão no STATUS.md do GitHub agora.")
+    sys.exit(0 if all(b for b, _, _ in res) else 2)
+
+
+# =================================================================== main
+
+def main():
+    p = argparse.ArgumentParser(prog="status-projeto", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--raiz", default=None, help="pasta do repositório (padrão: a atual)")
+    s = p.add_subparsers(dest="cmd")
+
+    s.add_parser("estado", help="diagnóstico em JSON para o /instalar-status")
+    x = s.add_parser("init", help="cria o config (primeira instalação)")
+    x.add_argument("--usuario", required=True)
+    x.add_argument("--valor", type=float, default=150.0)
+    x.add_argument("--pasta-fatias", default="fatias")
+    x.add_argument("--pasta-executadas", default="")
+    x.add_argument("--autor", action="append", help="só commits deste autor na estimativa (pode repetir)")
+    x.add_argument("--repo", action="append", help="repo irmão (caminho relativo, pode repetir)")
+    x = s.add_parser("status-md", help="cria (vazio) ou confere o STATUS.md")
+    x.add_argument("--vazio", action="store_true", help="cria o STATUS.md com as 5 fases se não existir")
+    x.add_argument("--completar-fases", action="store_true", help="acrescenta só as fases que faltam")
+    x.add_argument("--marcar", action="store_true", help="marca a etapa status_md como feita")
+    x = s.add_parser("espalhado", help="lista status espalhado em outros arquivos")
+    x.add_argument("--json", action="store_true")
+    s.add_parser("estimar", help="estimativa de horas pelo git (uma vez só)")
+    x = s.add_parser("claude-md", help="grava o bloco de regras no CLAUDE.md")
+    x.add_argument("--mesmo-assim", action="store_true")
+    s.add_parser("hooks", help="registra o plugin no projeto e confere hooks antigos")
+    s.add_parser("gitattributes", help="merge=union no sessoes.csv")
+    x = s.add_parser("gitignore", help="confere (e com --corrigir, ajusta) o .gitignore")
+    x.add_argument("--corrigir", action="store_true")
+    x = s.add_parser("guia", help="grava docs/COMO_USAR_STATUS.md e mostra o bloco ATENÇÃO")
+    x.add_argument("--marcar", action="store_true")
+    x = s.add_parser("etapa", help="marca uma etapa como feita")
+    x.add_argument("nome")
+    x.add_argument("--valor", default=None)
+    x = s.add_parser("reparar", help="lista o que falta ou quebrou")
+    x.add_argument("--json", action="store_true")
+    s.add_parser("atualizar", help="migra o config e atualiza o bloco do CLAUDE.md e o guia")
+    x = s.add_parser("repos", help="lista/adiciona/remove repos irmãos")
+    x.add_argument("--adicionar", action="append")
+    x.add_argument("--remover", action="append")
+    x = s.add_parser("relatorio", help="horas e custo")
+    x.add_argument("--todos", action="store_true", help="soma os repos irmãos do config")
+    x.add_argument("--repo", action="append", help="soma também este repo")
+    x = s.add_parser("valor", help="muda o valor da hora (sem efeito retroativo)")
+    x.add_argument("valor")
+    x.add_argument("--desde", default="")
+    x.add_argument("--obs", default="")
+    x = s.add_parser("historico", help="linha do tempo das fatias")
+    x.add_argument("--todos", action="store_true")
+    s.add_parser("cronograma", help="projeção das fatias em 📦")
+    x = s.add_parser("resumo", help="o que mudou nos últimos dias")
+    x.add_argument("--dias", type=int, default=3)
+    s.add_parser("ajuda", help="estado do projeto + guia")
+    s.add_parser("verificar", help="confere a integração")
+
+    a = p.parse_args()
+    if not a.cmd:
+        p.print_help()
+        return
+    a.raiz = c.raiz_principal(a.raiz or os.getcwd())
+    globals()["cmd_" + a.cmd.replace("-", "_")](a)
+
+
+if __name__ == "__main__":
+    main()
