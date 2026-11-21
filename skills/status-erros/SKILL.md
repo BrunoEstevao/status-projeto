@@ -5,7 +5,7 @@ argument-hint: "[anotar <texto> [--grave] | completar ID | estado ID --para ... 
 allowed-tools: Bash(status-projeto *) Bash(git diff *) AskUserQuestion
 ---
 Argumentos: `$ARGUMENTS`. O programa é `status-projeto` (no PATH; senão
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/status_projeto.py"`). Nunca edite o `ERROS.md` à mão: só acrescenta linha,
+`bash "${CLAUDE_PLUGIN_ROOT}/bin/status-projeto"`). Nunca edite o `ERROS.md` à mão: só acrescenta linha,
 pelo programa, e nada é apagado.
 
 - **Anotar** (`anotar ...` ou "anota o erro: ..."): grave na hora, do jeito que foi dito, **sem perguntas**:

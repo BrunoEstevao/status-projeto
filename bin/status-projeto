@@ -1,3 +1,20 @@
 #!/usr/bin/env bash
 # Comandos do plugin status-projeto (o bin/ do plugin entra no PATH do Bash do Claude Code).
-exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../scripts/status_projeto.py" "$@"
+# Acha o Python 3 sozinho (python3, python ou py -3). "preparar", "git-init" e "instalar-python" são bash puro:
+# funcionam antes de existir Python. Sem Python, os outros comandos saem com código 5.
+src="${BASH_SOURCE[0]//\\//}"
+if r="$(readlink -f "$src" 2>/dev/null)" && [ -n "$r" ]; then src="$r"; fi
+case "$src" in */*) dir="${src%/*}" ;; *) dir=. ;; esac
+raiz="$dir/.."
+. "$raiz/scripts/python.sh"
+case "${1:-}" in
+  preparar|git-init|instalar-python)
+    . "$raiz/scripts/preparar.sh"
+    cmd="${1//-/_}"; shift
+    "sp_cmd_$cmd" "$@"; exit $? ;;
+esac
+if sp_achar_python; then
+  exec "${SP_PY[@]}" "$raiz/scripts/status_projeto.py" "$@"
+fi
+echo "SEM_PYTHON: não achei o Python 3 (procurei python3, python e py -3). Rode /instalar-status: ele oferece instalar." >&2
+exit 5

@@ -9,7 +9,8 @@ allowed-tools: Bash(status-projeto *) Bash(git log *) Bash(git status *) Bash(gi
 # /instalar-status
 
 Você vai instalar o status-projeto no repositório atual. Fale em português, curto. O programa auxiliar é
-`status-projeto` (está no PATH; se não estiver, use `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/status_projeto.py"`).
+`status-projeto` (está no PATH; se não estiver, use `bash "${CLAUDE_PLUGIN_ROOT}/bin/status-projeto"`). Ele acha o
+Python sozinho (`python3`, `python` ou `py -3`); se sair com **código 5** e `SEM_PYTHON`, volte ao passo 0a.
 Argumentos recebidos: `$ARGUMENTS` (podem trazer `usuario=`, `valor=`, `pasta=`; o que vier não precisa ser perguntado).
 
 ## Regras que nunca quebram
@@ -27,11 +28,46 @@ Argumentos recebidos: `$ARGUMENTS` (podem trazer `usuario=`, `valor=`, `pasta=`;
   pergunta do que ela depende (ex.: "depende de os outros autores fazerem parte do mesmo custo").
 - Abaixo, cada pergunta já traz a ordem, a recomendada e o motivo. Não invente outra recomendação.
 
-## Passo 0 — diagnóstico
+## Passo 0a — o que falta na máquina (git e Python)
+Rode `status-projeto preparar` (bash puro: funciona sem Python) e leia o JSON. Código 0 = pronto, siga para o 0b.
+Código 5 = falta algo; trate nesta ordem, **antes de qualquer pergunta do passo 2** (assim nada se perde se precisar
+reabrir o terminal):
+- `continuando: true` → diga em uma linha "o Python agora responde (`<python.comando>` <versao>); continuo de onde
+  parei" e siga.
+- `git.situacao`:
+  - `pasta_pessoal` → **recuse** (também com git, ex.: dotfiles): "esta é a sua pasta pessoal; abra o Claude Code na
+    pasta do projeto e rode /instalar-status lá". Pare.
+  - `sem_repo` → pergunte (AskUserQuestion): **Criar o repositório git aqui (Recomendado)** — motivo: "o status, as
+    horas e o claude.ai dependem do git; `git init` só cria a pasta .git, não mexe nos arquivos" (mostre a pasta,
+    `git.pasta`) · **Não criar (sair)**. Sim → `status-projeto git-init` (ele recusa a pasta pessoal sozinho).
+  - `dono_diferente` (pasta de rede ou de outro usuário: o git recusa) → mostre `git.comando_safe_directory` e
+    pergunte: **Marcar a pasta como segura (Recomendado)** — motivo: "o git recusa pasta de rede até ela ser marcada;
+    o comando é o que o próprio git sugere" · **Sair**. Sim → rode o comando.
+  - `sem_git` → diga para instalar o git (no Windows, o Git for Windows, que traz o Git Bash) e pare.
+- `python.ok: false`:
+  - Se `python.recusados` não estiver vazio, diga quais existem mas não servem (ex.: `python3` que é o atalho da
+    Microsoft Store, ou Python 2/antigo; precisa do 3.8+).
+  - `python_pendente` preenchido → a instalação já rodou numa sessão anterior e o terminal ainda não vê o Python:
+    diga para fechar o Claude Code (todas as janelas do terminal), abrir de novo nesta pasta e rodar
+    /instalar-status. Pare.
+  - Com `instalar_python.comando` → mostre o comando **exato** e pergunte: **Instalar o Python 3 agora
+    (Recomendado)** — motivo: "os hooks de tempo e os comandos do plugin rodam em Python; sem ele as horas não são
+    medidas" · **Instalar eu mesmo** (mostre o passo a passo abaixo) · **Sair**. Sim → `status-projeto
+    instalar-python` e trate o código:
+    0 → o Python já responde nesta sessão: rode `status-projeto preparar` de novo e siga ·
+    6 → o comando pede senha (`sudo`): mostre a linha que ele imprimiu (`! sudo ...`) para o usuário rodar no prompt
+    e rodar /instalar-status depois · 7 → instalou, mas este terminal ainda não vê: repita o aviso de reabrir o
+    Claude Code e rodar /instalar-status (ele continua daqui) · 4 → falhou: mostre o passo a passo que ele imprimiu.
+  - Sem gerenciador (`instalar_python.gerenciador: "nenhum"`) → mostre o passo a passo (o `instalar-python` imprime
+    o do sistema, com código 4). No Windows ele inclui **marcar "Add python.exe to PATH"** na primeira tela do
+    instalador.
+  Não siga para o passo 0b sem `status-projeto preparar` com código 0.
+
+## Passo 0b — diagnóstico
 Rode `status-projeto estado` e leia o JSON (instalado, etapas_feitas, etapas_pendentes, precisa_atualizar, git,
 projeto_novo, status_md, claude_md, pastas_fatias_detectadas, fatias_soltas_na_raiz, fatias_fora_da_pasta,
 hooks_manuais_antigos).
-Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `git init`) e pare.
+Se `git.repo_git` for false (o passo 0a já cuidou disso) ou `git.pasta_pessoal` for true, volte ao passo 0a.
 
 ## Passo 1 — já instalado?
 - `instalacao_completa: true` → **não reinstale.** Se os argumentos trouxerem `sair`, `verificar`, `reparar` ou

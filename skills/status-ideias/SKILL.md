@@ -5,7 +5,7 @@ argument-hint: "[anotar <texto> | estado ID --para 'virou FATIA_X'|descartada|pe
 allowed-tools: Bash(status-projeto *) AskUserQuestion
 ---
 Argumentos: `$ARGUMENTS`. O programa é `status-projeto` (no PATH; senão
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/status_projeto.py"`). Nunca edite o `IDEIAS.md` à mão: só acrescenta linha,
+`bash "${CLAUDE_PLUGIN_ROOT}/bin/status-projeto"`). Nunca edite o `IDEIAS.md` à mão: só acrescenta linha,
 pelo programa, e nada é apagado.
 
 - **Anotar** (`anotar ...` ou "anota a ideia: ..."): `status-projeto ideia anotar "<texto do jeito que foi dito>"`, **sem

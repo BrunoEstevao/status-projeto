@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import unicodedata
 from datetime import datetime, timedelta
 
@@ -47,12 +48,68 @@ def versao_plugin():
         return "0.0.0"
 
 
+# ---------------------------------------------------------------- Windows: texto e caminhos
+
+def utf8_io():
+    """stdout/stderr em UTF-8 (no Windows o padrão é cp1252, que quebra nos emojis das fases)."""
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+def ler_stdin():
+    """stdin em UTF-8 qualquer que seja o idioma do sistema (o JSON do hook traz acentos: 'vou começar a codar')."""
+    try:
+        return sys.stdin.buffer.read().decode("utf-8-sig", "replace")
+    except Exception:
+        return ""
+
+
+def barra(p):
+    """Caminho com '/' (o git e o STATUS.md usam '/'; no Windows pode vir 'fatias\\FATIA_X.md')."""
+    return (p or "").replace("\\", "/")
+
+
+def nome_pasta(p):
+    """Nome da última pasta, aceitando '/' e '\\': 'Z:\\proj' → 'proj', '\\\\srv\\share\\app' → 'app',
+    'Z:\\' → 'Z' (projeto na raiz da unidade)."""
+    n = barra(p).rstrip("/")
+    return n.rsplit("/", 1)[-1].rstrip(":") or "raiz"
+
+
+def rel(p, base):
+    """Caminho relativo com '/'; em outra unidade do Windows (C: × Z:) não há relativo: devolve o absoluto."""
+    try:
+        return os.path.relpath(p, base).replace(os.sep, "/")
+    except ValueError:
+        return p
+
+
+def pasta_do_git_dir(git_dir, mod=os.path):
+    """'C:/proj/.git' → 'C:\\proj'; 'Z:/.git' → 'Z:\\' (raiz da unidade); '//srv/share/app/.git' → '\\\\srv\\share\\app'.
+    `mod` é o os.path do sistema (o teste passa ntpath para conferir o Windows no Linux)."""
+    g = mod.normpath(git_dir)
+    if mod.basename(g) != ".git":
+        return ""
+    return mod.dirname(g)
+
+
+def eh_pasta_pessoal(p):
+    try:
+        casa = os.path.expanduser("~")
+        return bool(casa) and os.path.normcase(os.path.realpath(p)) == os.path.normcase(os.path.realpath(casa))
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------- git
 
 def git(cwd, *args, timeout=15):
     try:
         r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout,
-                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+                           encoding="utf-8", errors="replace", env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         return r.stdout.strip() if r.returncode == 0 else ""
     except Exception:
         return ""
@@ -60,10 +117,11 @@ def git(cwd, *args, timeout=15):
 
 def raiz_principal(cwd):
     """Pasta do repositório principal (uma worktree grava no CSV do repositório principal)."""
-    comum = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if comum.endswith("/.git") and os.path.isdir(comum[:-5]):
-        return comum[:-5]
-    return git(cwd, "rev-parse", "--show-toplevel") or os.path.abspath(cwd)
+    comum = pasta_do_git_dir(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    if comum and os.path.isdir(comum):
+        return comum
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    return os.path.normpath(top) if top else os.path.abspath(cwd)
 
 
 def eh_repo_git(cwd):
@@ -170,6 +228,9 @@ def ler_config(raiz):
     except (FileNotFoundError, ValueError):
         return None
     cfg, _ = migrar(cfg)
+    for k in ("pasta_fatias", "pasta_fatias_executadas"):  # 'docs\\fatias' (config feito no Windows) → 'docs/fatias'
+        if isinstance(cfg.get(k), str):
+            cfg[k] = barra(cfg[k]).strip("/")
     tx = ler_taxa_csv(raiz)
     if tx:  # o taxa.csv do projeto manda; o config guarda uma cópia
         cfg["valor_hora"] = tx
@@ -227,7 +288,7 @@ def gravar_config(raiz, cfg):
     os.makedirs(os.path.join(raiz, PASTA_CFG), exist_ok=True)
     cfg["atualizado_em"] = agora_s()
     tmp = caminho_cfg(raiz) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
         f.write("\n")
     os.replace(tmp, caminho_cfg(raiz))
@@ -246,7 +307,7 @@ def gravar_estado_local(raiz, est):
     pasta = os.path.join(raiz, PASTA_LOCAL)
     os.makedirs(pasta, exist_ok=True)
     tmp = os.path.join(pasta, "estado.json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(est, f, ensure_ascii=False)
     os.replace(tmp, os.path.join(pasta, "estado.json"))
 
@@ -420,7 +481,7 @@ def nome_item(texto):
     t = re.sub(r"\[(P|M|G)\]\s*", "", texto).replace("**", "").strip()
     m = re.match(r"`([^`]+)`", t)
     if m:
-        return re.sub(r"\.md$", "", os.path.basename(m.group(1).rstrip("/")))
+        return re.sub(r"\.md$", "", nome_pasta(m.group(1)))
     primeira = re.split(r"\s+[—–]\s+|\s+-\s+|\(desde|;", t)[0]
     m = re.search(r"FATIA_[A-Za-z0-9_]+", primeira)
     if m:
@@ -429,13 +490,13 @@ def nome_item(texto):
     if nome:
         return nome[:60]
     m = re.search(r"`([^`]+)`", t)
-    return re.sub(r"\.md$", "", os.path.basename(m.group(1).rstrip("/"))) if m else t[:60]
+    return re.sub(r"\.md$", "", nome_pasta(m.group(1))) if m else t[:60]
 
 
 def normaliza(nome):
     n = unicodedata.normalize("NFKD", (nome or "").strip().lower())
     n = "".join(ch for ch in n if not unicodedata.combining(ch))
-    n = n.split("/")[-1]
+    n = barra(n).split("/")[-1]
     n = re.sub(r"\.md$", "", n)
     n = re.sub(r"^(fatia|feat|feature|fix|slice)[_\-]+", "", n)
     n = re.sub(r"[^0-9a-z]+", "_", n).strip("_")
@@ -486,13 +547,13 @@ def fatia_atual(cwd, raiz):
 
 def repos_do_projeto(raiz, cfg):
     """[(nome, caminho)] deste repo + irmãos que existirem."""
-    lst = [(os.path.basename(raiz), raiz)]
+    lst = [(nome_pasta(raiz), raiz)]
     for r in cfg.get("repos", []) or []:
         cam = r.get("caminho") if isinstance(r, dict) else str(r)
         if not cam:
             continue
-        cam = os.path.normpath(os.path.join(raiz, cam))
-        if os.path.isdir(cam) and cam != raiz:
-            nome = (r.get("nome") if isinstance(r, dict) else "") or os.path.basename(cam)
+        cam = os.path.normpath(os.path.join(raiz, barra(cam)))  # '..\\outro' gravado no Windows vale no Linux
+        if os.path.isdir(cam) and os.path.normcase(cam) != os.path.normcase(raiz):
+            nome = (r.get("nome") if isinstance(r, dict) else "") or nome_pasta(cam)
             lst.append((nome, cam))
     return lst

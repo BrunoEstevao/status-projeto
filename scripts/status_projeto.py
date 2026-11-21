@@ -55,7 +55,7 @@ def ler(caminho, padrao=""):
 
 def escrever(caminho, texto):
     os.makedirs(os.path.dirname(caminho) or ".", exist_ok=True)
-    with open(caminho, "w", encoding="utf-8") as f:
+    with open(caminho, "w", encoding="utf-8", newline="\n") as f:  # LF também no Windows
         f.write(texto)
 
 
@@ -110,7 +110,7 @@ def arquivos_versionados(raiz):
     lst = []
     for dirpath, dirnames, filenames in os.walk(raiz):
         dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "node_modules"]
-        lst += [os.path.relpath(os.path.join(dirpath, f), raiz) for f in filenames]
+        lst += [c.rel(os.path.join(dirpath, f), raiz) for f in filenames]
     return lst
 
 
@@ -125,7 +125,7 @@ def arquivos_do_repo(raiz, exts=(".md", ".txt")):
         for dirpath, dirnames, filenames in os.walk(raiz):
             dirnames[:] = [d for d in dirnames if d not in PASTAS_PESADAS and not d.startswith(".")]
             for f in filenames:
-                rel = os.path.relpath(os.path.join(dirpath, f), raiz).replace(os.sep, "/")
+                rel = c.rel(os.path.join(dirpath, f), raiz)
                 if ok(rel):
                     out[rel] = "fora do git"
         return out
@@ -170,8 +170,8 @@ def status_espalhado(raiz, cfg=None):
 def fatias_fora_da_pasta(raiz, cfg=None):
     """Arquivos FATIA_*.md (também com prefixo, ex.: docs/2026-11-14_FATIA_X.md) fora da pasta das fatias e da
     pasta das executadas, versionados ou não, dizendo se o STATUS.md já cita a fatia pelo nome."""
-    pf = (cfg or {}).get("pasta_fatias", "fatias").strip("/")
-    pe = (cfg or {}).get("pasta_fatias_executadas", "fatias_executadas").strip("/")
+    pf = c.barra((cfg or {}).get("pasta_fatias", "fatias")).strip("/")
+    pe = c.barra((cfg or {}).get("pasta_fatias_executadas", "fatias_executadas")).strip("/")
     status = ler(os.path.join(raiz, "STATUS.md")).lower()
     out = []
     for rel, situacao in sorted(arquivos_do_repo(raiz, (".md",)).items()):
@@ -563,7 +563,7 @@ def guardar_concluidos(raiz, arquivo, tirados, dias):
     novo = not os.path.exists(p)
     with open(p, "a", encoding="utf-8", newline="\n") as f:
         if novo:
-            f.write(f"# Concluídos anteriores — {os.path.basename(raiz)}\n\n"
+            f.write(f"# Concluídos anteriores — {c.nome_pasta(raiz)}\n\n"
                     "Itens tirados do ✅ do STATUS.md pelo corte (status-projeto status-md --cortar-concluidos).\n")
         f.write(f"\n## Corte de {c.agora():%d/%m/%Y} (concluídos há mais de {dias} dias)\n")
         for b in tirados:
@@ -603,7 +603,7 @@ def cmd_estado(a):
     pend = [e for e in c.ETAPAS if e not in etapas]
     saida = {
         "raiz": raiz,
-        "repo": os.path.basename(raiz),
+        "repo": c.nome_pasta(raiz),
         "instalado": cfg is not None,
         "instalacao_completa": cfg is not None and not pend,
         "etapas_feitas": {e: etapas[e] for e in c.ETAPAS if e in etapas},
@@ -614,6 +614,7 @@ def cmd_estado(a):
         "config": cfg,
         "git": {
             "repo_git": c.eh_repo_git(raiz),
+            "pasta_pessoal": c.eh_pasta_pessoal(raiz),
             "commits": c.n_commits(raiz),
             "autores": autores.most_common(5),
             "github": c.remoto_github(raiz),
@@ -646,6 +647,8 @@ def cmd_init(a):
         return
     if not a.usuario:
         sair("Falta --usuario.")
+    if c.eh_pasta_pessoal(raiz):
+        sair(f"Recusado: {raiz} é a sua pasta pessoal. Abra o Claude Code na pasta do projeto.", 3)
     cfg = c.config_padrao()
     tx = c.ler_taxa_csv(raiz)
     if tx:  # projeto já tem taxa.csv: aproveita, não sobrescreve
@@ -677,11 +680,11 @@ def cmd_init(a):
         "instalado_em": c.agora_s(),
         "usuario": a.usuario.strip(),
         "valor_hora": valor_hora,
-        "pasta_fatias": a.pasta_fatias.strip("/"),
-        "pasta_fatias_executadas": (a.pasta_executadas or a.pasta_fatias.strip("/") + "_executadas").strip("/"),
+        "pasta_fatias": c.barra(a.pasta_fatias).strip("/"),
+        "pasta_fatias_executadas": c.barra(a.pasta_executadas or c.barra(a.pasta_fatias).strip("/") + "_executadas").strip("/"),
         "projeto_novo": projeto_e_novo(raiz),
         "autores_git": a.autor or [],
-        "repos": [{"nome": os.path.basename(os.path.normpath(r)), "caminho": r} for r in (a.repo or [])],
+        "repos": [{"nome": c.nome_pasta(r), "caminho": c.barra(r)} for r in (a.repo or [])],
     })
     cfg["etapas"] = {"config": c.agora_s()}
     c.gravar_config(raiz, cfg)
@@ -696,7 +699,7 @@ def cmd_status_md(a):
         if os.path.exists(p):
             print("STATUS.md já existe; não foi sobrescrito.")
         else:
-            escrever(p, template("STATUS.md", {"projeto": os.path.basename(raiz), "data": c.agora().strftime("%d/%m/%Y"),
+            escrever(p, template("STATUS.md", {"projeto": c.nome_pasta(raiz), "data": c.agora().strftime("%d/%m/%Y"),
                                                "usuario": cfg.get("usuario") or "o usuário"}))
             print("STATUS.md criado com as 5 fases vazias.")
     falta = fases_faltando(raiz)
@@ -1023,7 +1026,7 @@ def estimar_git(raiz, corte, taxas, autores=None, gap_h=2.0, antes_min=30.0):
         t = c.taxa_em(taxas, ini)
         linhas.append({"inicio": ini.strftime("%Y-%m-%d %H:%M"), "fim": fim.strftime("%Y-%m-%d %H:%M"),
                        "horas": f"{h:.2f}", "fatia": fatia, "tipo": "interativo", "commits": len(g),
-                       "repo": os.path.basename(raiz), "valor_hora": f"{t:.2f}", "custo": f"{h * t:.2f}"})
+                       "repo": c.nome_pasta(raiz), "valor_hora": f"{t:.2f}", "custo": f"{h * t:.2f}"})
     return linhas, len(commits)
 
 
@@ -1073,7 +1076,7 @@ def bloco_regras(cfg, raiz):
                          + ", ".join(irmaos) + ".") if irmaos else
                         "Este projeto tem um repo só (irmãos entram em `repos` no `.claude-status/config.json`).",
         "listas_repos": ("Projeto com vários repos: cada ideia/erro leva a etiqueta do app (`--app "
-                         + "|".join([os.path.basename(raiz)] + [r.get("nome") or os.path.basename(r.get("caminho", ""))
+                         + "|".join([c.nome_pasta(raiz)] + [r.get("nome") or os.path.basename(r.get("caminho", ""))
                                                                for r in cfg.get("repos", []) if isinstance(r, dict)])
                          + "`) e é gravado no repo dele. **Na dúvida de qual app é, pergunte.**")
                         if irmaos else "Um repo só: o app de cada ideia/erro é este repo.",
@@ -1097,7 +1100,7 @@ def cmd_claude_md(a):
                 print(f"  {x}")
             sair("Nada foi gravado. Pergunte ao usuário: tirar as seções antigas e usar o bloco do plugin, "
                  "ou gravar o bloco mesmo assim (--mesmo-assim).", 3)
-        base = texto.rstrip("\n") if texto else f"# CLAUDE.md — {os.path.basename(raiz)}"
+        base = texto.rstrip("\n") if texto else f"# CLAUDE.md — {c.nome_pasta(raiz)}"
         novo = base + "\n\n" + bloco + "\n"
         acao = "acrescentado no fim" if texto else "criado"
     if novo != texto:
@@ -1181,17 +1184,30 @@ def tem_union(texto, arq):
     return bool(re.search(r"^\s*/?" + re.escape(arq) + r"\s+.*\bmerge=union\b", texto, re.M))
 
 
+LINHA_LF = "docs/tempo/*.csv text eol=lf"
+
+
+def tem_lf(texto):
+    return bool(re.search(r"^\s*/?docs/tempo/\*\.csv\s+.*\beol=lf\b", texto, re.M))
+
+
 def garantir_union(raiz):
-    """Acrescenta no .gitattributes o merge=union que faltar (sessoes.csv, IDEIAS.md, ERROS.md). True se mudou."""
+    """Acrescenta no .gitattributes o merge=union que faltar (sessoes.csv, IDEIAS.md, ERROS.md) e o eol=lf dos CSVs
+    (no Windows, com core.autocrlf=true, o checkout poria CRLF). True se mudou."""
     p = os.path.join(raiz, ".gitattributes")
     texto = ler(p)
     faltam = [x for x in UNION if not tem_union(texto, x)]
-    if not faltam:
+    if not faltam and tem_lf(texto):
         return False
+    if not faltam:
+        escrever(p, texto.rstrip("\n") + "\n" + LINHA_LF + "\n")
+        return True
     novo = (texto.rstrip("\n") + "\n\n" if texto.strip() else "")
     novo += ("# status-projeto: cada sessão/registro é uma linha; no merge, junta as linhas dos dois lados\n"
              if not texto.count("status-projeto:") else "")
     novo += "".join(f"{x} merge=union\n" for x in faltam)
+    if not tem_lf(texto):
+        novo += LINHA_LF + "\n"
     escrever(p, novo)
     return True
 
@@ -1297,7 +1313,7 @@ def montar_guia(raiz, cfg):
     gh, instrucoes, frase = textos_claude_ai(raiz, cfg)
     revisar = itens_a_revisar(raiz)
     return template("COMO_USAR_STATUS.md", {
-        "projeto": os.path.basename(raiz),
+        "projeto": c.nome_pasta(raiz),
         "repo_github": gh,
         "usuario": cfg.get("usuario") or "o usuário",
         "valor": c.dinheiro(c.taxas(cfg)[-1][1], cfg.get("moeda", "R$")),
@@ -1354,6 +1370,8 @@ def diagnostico(raiz, cfg):
         sem = [x for x in UNION if not tem_union(ga, x)]
         if sem:
             falta.append(("gitattributes", "merge=union faltando no .gitattributes para " + ", ".join(sem)))
+        if not tem_lf(ga):
+            falta.append(("gitattributes", f"falta `{LINHA_LF}` no .gitattributes (CSVs com LF também no Windows)"))
     sem_listas = [L.ARQ[t] for t in ("ideia", "erro") if not os.path.exists(L.caminho(raiz, t))]
     if sem_listas and "status_md" in et:
         falta.append(("listas", " e ".join(sem_listas) + " não existem (rode `status-projeto listas`)"))
@@ -1440,9 +1458,9 @@ def cmd_repos(a):
     raiz = a.raiz
     cfg = precisa_config(raiz)
     lst = cfg.setdefault("repos", [])
-    for r in a.adicionar or []:
+    for r in [c.barra(x) for x in a.adicionar or []]:
         if not any(isinstance(x, dict) and x.get("caminho") == r for x in lst):
-            lst.append({"nome": os.path.basename(os.path.normpath(r)), "caminho": r})
+            lst.append({"nome": c.nome_pasta(r), "caminho": r})
     for r in a.remover or []:
         lst[:] = [x for x in lst if not (isinstance(x, dict) and (x.get("caminho") == r or x.get("nome") == r))]
     if a.adicionar or a.remover:
@@ -1530,11 +1548,11 @@ def blocos_do_repo(nome, cam, cfg_principal):
 
 
 def coletar(raiz, cfg, todos=False, extras=None):
-    repos = c.repos_do_projeto(raiz, cfg) if todos else [(os.path.basename(raiz), raiz)]
+    repos = c.repos_do_projeto(raiz, cfg) if todos else [(c.nome_pasta(raiz), raiz)]
     for e in extras or []:
         cam = c.raiz_principal(e)
         if all(cam != x[1] for x in repos):
-            repos.append((os.path.basename(cam), cam))
+            repos.append((c.nome_pasta(cam), cam))
     blocos, infos = [], []
     for nome, cam in repos:
         b, i = blocos_do_repo(nome, cam, cfg)
@@ -1648,7 +1666,7 @@ def cmd_relatorio(a):
               f"{c.dinheiro(uc, moeda)} — {c.horas_txt(th - uh)} eram simultâneas")
 
     fases_por_repo = {}
-    for nome, cam in (c.repos_do_projeto(raiz, cfg) if a.todos else [(os.path.basename(raiz), raiz)]):
+    for nome, cam in (c.repos_do_projeto(raiz, cfg) if a.todos else [(c.nome_pasta(raiz), raiz)]):
         fases_por_repo[nome], _ = c.ler_status_arquivo(cam)
     pf = por_fatia(blocos)
     if pf:
@@ -1699,7 +1717,7 @@ def cmd_historico(a):
     moeda = cfg.get("moeda", "R$")
     blocos, infos = coletar(raiz, cfg, a.todos)
     fases_por_repo = {nome: c.ler_status_arquivo(cam)[0]
-                      for nome, cam in (c.repos_do_projeto(raiz, cfg) if a.todos else [(os.path.basename(raiz), raiz)])}
+                      for nome, cam in (c.repos_do_projeto(raiz, cfg) if a.todos else [(c.nome_pasta(raiz), raiz)])}
     pf = por_fatia(blocos)
     # Itens do STATUS.md que ainda não têm horas também entram na linha do tempo.
     for repo, fases in fases_por_repo.items():
@@ -1855,7 +1873,7 @@ def cmd_ajuda(a):
         return
     moeda = cfg.get("moeda", "R$")
     fases, _ = c.ler_status_arquivo(raiz)
-    print(f"Projeto {os.path.basename(raiz)} — estado agora\n")
+    print(f"Projeto {c.nome_pasta(raiz)} — estado agora\n")
     if fases:
         for e, nome in c.FASES:
             print(f"  {e} {nome}: {len(fases[e])}")
@@ -2037,7 +2055,7 @@ def cmd_ideia(a):
     cfg = precisa_config(raiz)
     if a.acao == "anotar":
         it, cam = L.anotar(raiz, cfg, "ideia", " ".join(a.texto), app=a.app)
-        print(f"Ideia anotada em {os.path.relpath(L.caminho(cam, 'ideia'), raiz)}: {it['id']} · {it['app']} · {it['texto']}")
+        print(f"Ideia anotada em {c.rel(L.caminho(cam, 'ideia'), raiz)}: {it['id']} · {it['app']} · {it['texto']}")
     elif a.acao == "estado":
         if not a.texto or not a.para:
             sair("Use: status-projeto ideia estado ID [ID...] --para 'virou FATIA_X' | descartada | pendente")
@@ -2054,7 +2072,7 @@ def cmd_erro(a):
     if a.acao == "anotar":
         it, cam = L.anotar(raiz, cfg, "erro", " ".join(a.texto), app=a.app, grave=a.grave, det=_det(a),
                            fora_do_teste=a.fora_do_teste)
-        print(f"Erro anotado em {os.path.relpath(L.caminho(cam, 'erro'), raiz)}: {it['id']} · {it['app']} · "
+        print(f"Erro anotado em {c.rel(L.caminho(cam, 'erro'), raiz)}: {it['id']} · {it['app']} · "
               f"{it['gravidade']} · {it['texto']}")
         falta = L.faltando(it)
         if falta:
@@ -2105,7 +2123,7 @@ def cmd_erro(a):
 def cmd_colar(a):
     cfg = precisa_config(a.raiz)
     tipo, cam, gravou = L.colar(a.raiz, cfg, " ".join(a.linha))
-    arq = os.path.relpath(L.caminho(cam, tipo), a.raiz)
+    arq = c.rel(L.caminho(cam, tipo), a.raiz)
     print(f"Linha gravada no fim de {arq}." if gravou else f"Essa linha já está em {arq}; nada mudou.")
 
 
@@ -2216,6 +2234,7 @@ def main():
     x.add_argument("linha", nargs="+")
     s.add_parser("verificar", help="confere a integração")
 
+    c.utf8_io()
     a = p.parse_args()
     if not a.cmd:
         p.print_help()

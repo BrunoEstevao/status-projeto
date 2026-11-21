@@ -5,6 +5,36 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.11.0] — 2026-11-21
+### Adicionado
+- Windows: o Python é achado sozinho, nesta ordem: `python3`, `python`, `py -3` (o primeiro que for Python 3.8+; o
+  atalho da Microsoft Store e o Python 2 são pulados) e, fora do PATH, as pastas onde o instalador põe
+  (`%LOCALAPPDATA%\Programs\Python\Python3*`, `Program Files`, Homebrew). O comando achado fica em cache em
+  `~/.claude/status-projeto/python.txt` (os hooks rodam a cada ferramenta).
+- `status-projeto preparar`, `git-init` e `instalar-python`, em bash puro (funcionam antes de existir Python):
+  - `preparar`: JSON com o sistema, o Python achado (e os recusados), o comando de instalação e a situação do git
+    (`ok`, `sem_repo`, `pasta_pessoal`, `dono_diferente` com o `safe.directory` que o git sugere, `sem_git`).
+  - `git-init`: cria o repositório; recusa a pasta pessoal (código 3).
+  - `instalar-python`: instala pelo `winget` (com `PrependPath=1`, que põe no PATH), `apt`, `dnf`, `pacman` ou `brew`.
+    Sem gerenciador ou se falhar: passo a passo manual (no Windows, marcar "Add python.exe to PATH"). `sudo` que pede
+    senha: código 6, com a linha para rodar com `!`. Instalou mas o terminal não vê: código 7, avisa para reabrir e
+    marca a instalação pendente; na próxima rodada, `preparar` diz `continuando: true`.
+- `/instalar-status` (passo 0a): antes de qualquer pergunta, confere git e Python e oferece `git init`,
+  `safe.directory` e a instalação do Python, sempre com confirmação. Continua recusando a pasta pessoal (agora também
+  no `init`, e também quando a pasta pessoal é um repositório git).
+- `.gitattributes` do projeto ganha `docs/tempo/*.csv text eol=lf` (no Windows, com `core.autocrlf=true`, o checkout
+  poria CRLF nos CSVs); `reparar` aponta quando falta. O `.gitattributes` do plugin força LF nos scripts.
+### Mudado
+- Os hooks chamam `bash hooks/tempo.sh` em vez de `python3`: sem Python, saem em silêncio com código 0 (nada de
+  "hook failed"). Sem Python, os outros comandos do `status-projeto` saem com código 5 (`SEM_PYTHON`).
+### Corrigido
+- Windows: saída e entrada em UTF-8 (o console em cp1252 quebrava nos emojis, e o "vou começar a codar" com ç
+  chegava errado ao hook); texto do git lido em UTF-8; todo arquivo gravado com LF (STATUS.md, CLAUDE.md, config,
+  guia), não só os CSVs.
+- Caminhos: barra invertida em `--pasta-fatias`, `--repo` e no config feito no Windows (`docs\fatias`, `..\outro`)
+  vira `/`; projeto na raiz da unidade (`Z:\`) e em pasta de rede (`\\servidor\pasta`) acha a raiz e o nome certos;
+  caminho em outra unidade (C: × Z:) não quebra o relativo.
+
 ## [1.10.0] — 2026-11-21
 ### Adicionado
 - Ideias pendentes e erros a corrigir: `IDEIAS.md` e `ERROS.md` na raiz do repo, criados pelo instalador

@@ -71,7 +71,7 @@ def criar_arquivos(raiz):
         p = caminho(raiz, tipo)
         if not os.path.exists(p):
             with open(p, "w", encoding="utf-8", newline="\n") as f:
-                f.write(CABECALHO[tipo].format(projeto=os.path.basename(raiz)))
+                f.write(CABECALHO[tipo].format(projeto=c.nome_pasta(raiz)))
             criados.append(ARQ[tipo])
     return criados
 
@@ -409,12 +409,12 @@ def montar_fatia(raiz, cfg, ids=None, topo=False, app="", gravar=False):
         por_id = {e["id"]: e for e in itens(cam, "erro").values()}
         for i in ids:
             if i not in por_id:
-                raise Recusa(f"{i} não está no ERROS.md de {os.path.basename(cam)}.")
+                raise Recusa(f"{i} não está no ERROS.md de {c.nome_pasta(cam)}.")
             if por_id[i]["estado"] != "aberto":
                 raise Recusa(f"{i} não está aberto (está '{por_id[i]['estado']}').")
         abertos = [e for e in abertos if e["id"] in ids]
     if not abertos:
-        raise Recusa("Nenhum erro aberto no ERROS.md" + (f" de {os.path.basename(cam)}" if app else "") + ".")
+        raise Recusa("Nenhum erro aberto no ERROS.md" + (f" de {c.nome_pasta(cam)}" if app else "") + ".")
     abertos.sort(key=lambda e: (e["gravidade"] != "grave", e["criado"]))
     grupos = {}
     for e in abertos:
@@ -430,7 +430,7 @@ def montar_fatia(raiz, cfg, ids=None, topo=False, app="", gravar=False):
     topo = topo or bool(graves)
     hoje = c.agora()
     md = [f"[{tam}] {nome} — correção de {len(abertos)} erro(s)" + (f" ({graves} grave(s))" if graves else ""), "",
-          f"Gerada em {hoje:%d/%m/%Y} a partir do `ERROS.md`" + (f" ({os.path.basename(cam)})" if app else "") +
+          f"Gerada em {hoje:%d/%m/%Y} a partir do `ERROS.md`" + (f" ({c.nome_pasta(cam)})" if app else "") +
           ", com os erros abertos agrupados por área (tela). Tamanho pela quantidade de erros "
           "(até 3 = P, até 8 = M, mais = G).", ""]
     for a in ordem:
@@ -450,7 +450,7 @@ def montar_fatia(raiz, cfg, ids=None, topo=False, app="", gravar=False):
            "- Teste não passou → a fatia volta para 🌐 com o que falhou em `Pendente:`; os erros continuam "
            f"`em {nome}`.", ""]
     item = f"- [{tam}] `{rel}` — correção de {len(abertos)} erro(s): {', '.join(ordem)} (desde {hoje:%d/%m})"
-    plano = {"fatia": nome, "arquivo": rel, "repo": os.path.basename(cam), "tamanho": tam, "topo": topo,
+    plano = {"fatia": nome, "arquivo": rel, "repo": c.nome_pasta(cam), "tamanho": tam, "topo": topo,
              "erros": [e["id"] for e in abertos], "areas": {a: [e["id"] for e in grupos[a]] for a in ordem},
              "incompletos": {e["id"]: faltando(e) for e in incompletos}, "item_status": item,
              "conteudo": "\n".join(md)}

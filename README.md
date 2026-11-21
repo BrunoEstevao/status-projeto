@@ -31,7 +31,26 @@ Todo item termina com `(desde DD/MM)`, a data em que entrou na fase.
 
 ## Instalação
 
-Precisa de Claude Code 2.1 ou mais novo, `git` e `python3`.
+Precisa de Claude Code 2.1 ou mais novo, `git` e Python 3.8 ou mais novo (`python3`, `python` ou `py -3`: o
+plugin usa o primeiro que for Python 3).
+
+**No Windows** o Claude Code roda os comandos no **Git Bash**, então precisa do [Git for Windows](https://git-scm.com/download/win)
+(traz o git e o Git Bash) e do **Python 3** ([python.org](https://www.python.org/downloads/); no instalador, marque
+**"Add python.exe to PATH"**). Funciona em pasta com letra de unidade (`Z:\projeto`) e em pasta de rede.
+
+O que o `/instalar-status` resolve sozinho, sempre perguntando antes (a opção recomendada é "sim"):
+
+- **Pasta sem git**: oferece rodar `git init`. Na sua pasta pessoal ele recusa (abra o Claude Code na pasta do projeto).
+- **Pasta de rede que o git recusa** ("dubious ownership"): mostra o `git config --global --add safe.directory ...` que o
+  próprio git sugere e oferece rodar.
+- **Sem Python 3**: mostra o comando e oferece instalar pelo gerenciador do sistema (`winget` no Windows, `apt`/`dnf`/
+  `pacman` no Linux, `brew` no macOS). Se não houver gerenciador ou a instalação falhar, mostra o passo a passo.
+  Comando com `sudo` que pede senha: ele mostra a linha para você rodar com `!` na frente.
+- **Instalou, mas o terminal ainda não vê o Python** (o PATH novo só vale em terminal novo): ele procura também nas
+  pastas onde o instalador põe o Python; se mesmo assim não achar, avisa para reabrir o Claude Code e, ao rodar
+  `/instalar-status` de novo, continua de onde parou.
+
+Sem Python, os hooks de tempo saem em silêncio (nada de "hook failed"); só não medem o tempo até o Python existir.
 
 **1. Instale o plugin** (uma vez por computador). Dentro do Claude Code:
 
@@ -223,6 +242,7 @@ tirar as regras, apague o bloco entre as marcas `status-projeto` no `CLAUDE.md`.
 ```bash
 claude plugin validate .        # valida plugin e marketplace
 tests/testar.sh                 # instala 2x num repo vazio e num com histórico, simula hooks e relatórios
+                                # (inclui sem python, só python, py -3, pasta sem git e caminhos do Windows)
 claude --plugin-dir .           # usa o plugin desta pasta sem instalar
 ```
 

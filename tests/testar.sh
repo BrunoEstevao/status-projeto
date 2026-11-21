@@ -586,6 +586,108 @@ checa "atualizar cria os dois e acrescenta o merge=union (sem duplicar o do CSV)
 H_ID="$(sha256sum < $V/IDEIAS.md)"; ( cd "$V" && $SP atualizar > /dev/null && $SP listas > /dev/null )
 checa "rodar de novo não mexe nos arquivos" "[ \"\$(sha256sum < $V/IDEIAS.md)\" = \"$H_ID\" ]"
 
+echo "== Windows: Python, git e caminhos"
+REAL_PY="$(command -v python3)"
+SPB="$PLUGIN/bin/status-projeto"
+export STATUS_PROJETO_LOCAIS_PYTHON=""   # sem as pastas conhecidas (nesta máquina /usr/bin/python3 existe)
+# PATH só com o básico e sem nenhum Python
+SEMPY="$BASE/bin_sem_python"; rm -rf "$SEMPY"; mkdir -p "$SEMPY"
+for t in bash sh git cat dirname readlink uname grep sed head mkdir rm date tr sort id env true sha256sum ls ln wc; do
+  ln -sf "$(type -P $t)" "$SEMPY/$t"; done
+CASA="$BASE/casa"; rm -rf "$CASA"; mkdir -p "$CASA"
+JSON_HOOK='{"session_id":"w1","cwd":"'"$V"'","hook_event_name":"UserPromptSubmit","prompt":"vou começar a codar FATIA_WIN","permission_mode":"default"}'
+# 1. sem python
+OUT="$(printf '%s' "$JSON_HOOK" | HOME="$CASA" PATH="$SEMPY" bash "$PLUGIN/hooks/tempo.sh" UserPromptSubmit 2>&1)"; rc=$?
+checa "sem python: hook sai com 0, sem mensagem nenhuma (nada de 'hook failed')" "[ $rc = 0 ] && [ -z \"\$OUT\" ]"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$SEMPY" "$SPB" estado 2>&1)"; rc=$?
+checa "sem python: status-projeto sai com 5 e manda rodar /instalar-status" "[ $rc = 5 ] && grep -q 'SEM_PYTHON' <<<\"\$OUT\" && grep -q '/instalar-status' <<<\"\$OUT\""
+OUT="$(cd "$V" && HOME="$CASA" PATH="$SEMPY" "$SPB" preparar)"; rc=$?
+checa "sem python: preparar (bash puro) diz que falta, com código 5" "[ $rc = 5 ] && grep -q '\"python\": {\"ok\": false' <<<\"\$OUT\" && grep -q '\"situacao\": \"ok\"' <<<\"\$OUT\""
+# 2. só python (sem python3); um python3 quebrado (atalho da Microsoft Store) é pulado
+SOPY="$BASE/bin_so_python"; rm -rf "$SOPY"; cp -a "$SEMPY" "$SOPY"; ln -sf "$REAL_PY" "$SOPY/python"
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 9009\n' > "$SOPY/python3"; chmod +x "$SOPY/python3"
+N0="$(cat "$V/docs/tempo/sessoes.csv" 2>/dev/null | wc -l)"
+OUT="$(printf '%s' "$JSON_HOOK" | HOME="$CASA" PATH="$SOPY" bash "$PLUGIN/hooks/tempo.sh" UserPromptSubmit 2>&1)"; rc=$?
+checa "só python: o hook roda com 'python' (o python3 do atalho da Store é pulado)" "[ $rc = 0 ] && [ \$(cat $V/docs/tempo/sessoes.csv | wc -l) -gt $N0 ] && grep -q '🌐 Codando' <<<\"\$OUT\""
+checa "acento no stdin ('começar') reconhecido pelo hook" "grep -q 'vou começar a codar' <<<\"\$OUT\""
+OUT="$(cd "$V" && HOME="$CASA" PATH="$SOPY" "$SPB" preparar)"; rc=$?
+checa "só python: preparar acha 'python' e cita o python3 recusado" "[ $rc = 0 ] && grep -q '\"comando\": \"python\"' <<<\"\$OUT\" && grep -q '\"recusados\": \[\"python3\"\]' <<<\"\$OUT\""
+checa "só python: os comandos rodam" "(cd $V && HOME=$CASA PATH=$SOPY $SPB reparar | grep -q 'Nada faltando')"
+# 3. só o py -3 (lançador do Windows)
+SOPYL="$BASE/bin_so_py"; rm -rf "$SOPYL"; cp -a "$SEMPY" "$SOPYL"
+printf '#!/bin/sh\n[ "$1" = "-3" ] || exit 1\nshift\nexec "%s" "$@"\n' "$REAL_PY" > "$SOPYL/py"; chmod +x "$SOPYL/py"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$SOPYL" "$SPB" preparar)"
+checa "só py -3: preparar acha 'py -3'" "grep -q '\"comando\": \"py -3\"' <<<\"\$OUT\""
+checa "só py -3: os comandos rodam" "(cd $V && HOME=$CASA PATH=$SOPYL $SPB reparar | grep -q 'Nada faltando')"
+# 4. Python fora do PATH, na pasta onde o instalador põe (terminal aberto antes da instalação)
+LOC="$BASE/local_py/Python312"; mkdir -p "$LOC"; ln -sf "$REAL_PY" "$LOC/python.exe"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$SEMPY" STATUS_PROJETO_LOCAIS_PYTHON='$LOCALAPPDATA/Python3*/python.exe' LOCALAPPDATA="$BASE\\local_py" "$SPB" preparar)"
+checa "Python fora do PATH, em %LOCALAPPDATA% com barra invertida: achado" "grep -q 'local_py/Python312/python.exe' <<<\"\$OUT\""
+# 5. pasta sem git e pasta pessoal
+SG="$BASE/sem_git"; rm -rf "$SG"; mkdir -p "$SG"
+OUT="$(cd "$SG" && HOME="$CASA" "$SPB" preparar)"; rc=$?
+checa "pasta sem git: preparar diz sem_repo (código 5)" "[ $rc = 5 ] && grep -q '\"situacao\": \"sem_repo\"' <<<\"\$OUT\""
+OUT="$(cd "$SG" && HOME="$CASA" "$SPB" git-init 2>&1)"; rc=$?
+checa "pasta sem git: git-init cria o repo" "[ $rc = 0 ] && [ -d $SG/.git ] && (cd $SG && HOME=$CASA $SPB preparar >/dev/null)"
+OUT="$(cd "$CASA" && HOME="$CASA" "$SPB" git-init 2>&1)"; rc=$?
+checa "pasta pessoal: git-init recusa (código 3) e não cria nada" "[ $rc = 3 ] && [ ! -d $CASA/.git ] && grep -q 'pasta pessoal' <<<\"\$OUT\""
+checa "pasta pessoal: preparar diz pasta_pessoal" "(cd $CASA && { HOME=$CASA $SPB preparar || true; } | grep -q pasta_pessoal)"
+git -C "$CASA" init -q
+checa "pasta pessoal com git (dotfiles): preparar e init recusam" "(cd $CASA && { HOME=$CASA $SPB preparar || true; } | grep -q pasta_pessoal) && ! (cd $CASA && HOME=$CASA $SP init --usuario X >/dev/null 2>&1) && [ ! -e $CASA/.claude-status ]"
+rm -rf "$CASA/.git"
+DG="$BASE/dono"; rm -rf "$DG"; mkdir -p "$DG"; git -C "$DG" init -q
+OUT="$(cd "$DG" && GIT_TEST_ASSUME_DIFFERENT_OWNER=1 HOME="$CASA" "$SPB" preparar)"
+checa "pasta de rede com outro dono: preparar mostra o comando safe.directory do git" "grep -q '\"situacao\": \"dono_diferente\"' <<<\"\$OUT\" && grep -q 'safe.directory' <<<\"\$OUT\""
+# 6. instalar o Python pelo gerenciador (apt e sudo de mentira)
+INST="$BASE/bin_inst"; rm -rf "$INST"; cp -a "$SEMPY" "$INST"; NOVO="$BASE/py_novo"; rm -rf "$NOVO"; mkdir -p "$NOVO"
+printf '#!/bin/sh\n[ "$1" = "-n" ] && shift\nexec "$@"\n' > "$INST/sudo"
+printf '#!/bin/sh\nln -sf "%s" "%s/python3"\n' "$REAL_PY" "$NOVO" > "$INST/apt-get"; chmod +x "$INST/sudo" "$INST/apt-get"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" "$SPB" preparar)"
+checa "preparar mostra o comando de instalação (apt)" "grep -q '\"comando\": \"sudo apt-get install -y python3\"' <<<\"\$OUT\""
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" "$SPB" instalar-python 2>&1)"; rc=$?
+checa "instalou mas o terminal não vê: código 7, manda reabrir e marca pendente" "[ $rc = 7 ] && grep -q 'Feche o Claude Code' <<<\"\$OUT\" && [ -f $CASA/.claude/status-projeto/python-pendente.txt ]"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" "$SPB" preparar)"
+checa "rodando de novo sem reabrir: python_pendente aparece" "grep -q '\"python_pendente\": {\"desde\"' <<<\"\$OUT\""
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST:$NOVO" "$SPB" preparar)"; rc=$?
+checa "terminal reaberto: Python achado, continuando=true e a marca sai" "[ $rc = 0 ] && grep -q '\"continuando\": true' <<<\"\$OUT\" && [ ! -f $CASA/.claude/status-projeto/python-pendente.txt ]"
+rm -f "$NOVO/python3"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" STATUS_PROJETO_LOCAIS_PYTHON="$NOVO/python3" "$SPB" instalar-python 2>&1)"; rc=$?
+checa "instalou numa pasta conhecida: Python pronto na mesma sessão (código 0)" "[ $rc = 0 ] && grep -q 'Python pronto nesta sessão' <<<\"\$OUT\""
+printf '#!/bin/sh\nexit 1\n' > "$INST/sudo"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" "$SPB" instalar-python 2>&1)"; rc=$?
+checa "sudo pede senha: código 6 e o comando para rodar com !" "[ $rc = 6 ] && grep -q '! sudo apt-get install -y python3' <<<\"\$OUT\""
+rm -f "$INST/apt-get"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" "$SPB" instalar-python 2>&1)"; rc=$?
+checa "sem gerenciador: código 4 e o passo a passo manual" "[ $rc = 4 ] && grep -q 'Instalar o Python 3 no Linux, à mão' <<<\"\$OUT\""
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" STATUS_PROJETO_SISTEMA=windows "$SPB" instalar-python 2>&1)"
+checa "passo a passo do Windows manda marcar 'Add python.exe to PATH'" "grep -q 'Add python.exe to PATH' <<<\"\$OUT\""
+printf '#!/bin/sh\nexit 0\n' > "$INST/winget"; chmod +x "$INST/winget"
+OUT="$(cd "$V" && HOME="$CASA" PATH="$INST" STATUS_PROJETO_SISTEMA=windows "$SPB" preparar)"
+checa "Windows com winget: comando com PrependPath=1 (põe no PATH)" "grep -q 'winget install -e --id Python.Python.3.12' <<<\"\$OUT\" && grep -q 'PrependPath=1' <<<\"\$OUT\""
+unset STATUS_PROJETO_LOCAIS_PYTHON
+# 7. caminhos do Windows (conferidos com o ntpath) e LF
+OUT="$(python3 - "$PLUGIN/scripts" <<'PY'
+import sys, ntpath; sys.path.insert(0, sys.argv[1]); import comum as c
+r = [c.pasta_do_git_dir("Z:/.git", ntpath), c.pasta_do_git_dir("C:/Users/Ana/proj/.git", ntpath),
+     c.pasta_do_git_dir("//servidor/share/app/.git", ntpath), c.nome_pasta("Z:\\"), c.nome_pasta("Z:\\proj"),
+     c.nome_pasta("\\\\servidor\\share\\app"), c.barra("docs\\fatias"), c.normaliza("fatias\\FATIA_LOGIN.md")]
+print("|".join(r))
+PY
+)"
+checa "Z:\\ , C:\\..., \\\\servidor\\share e barra invertida (ntpath)" "[ \"\$OUT\" = 'Z:\\|C:\\Users\\Ana\\proj|\\\\servidor\\share\\app|Z|proj|app|docs/fatias|login' ]"
+W="$BASE/win"; rm -rf "$W" "$BASE/win_irmao"; mkdir -p "$W" "$BASE/win_irmao"; git -C "$W" init -q -b main; git -C "$BASE/win_irmao" init -q -b main
+git -C "$W" remote add origin https://github.com/Dono-Teste/win.git
+( cd "$W" && $SP init --usuario T --pasta-fatias 'docs\fatias' --repo '..\win_irmao' > /dev/null && $SP status-md --vazio --marcar > /dev/null && $SP claude-md > /dev/null && $SP guia --gravar --marcar > /dev/null 2>&1 )
+checa "--pasta-fatias 'docs\\fatias' e --repo '..\\irmao' gravados com '/'" "grep -q '\"pasta_fatias\": \"docs/fatias\"' $W/.claude-status/config.json && grep -q '\"caminho\": \"../win_irmao\"' $W/.claude-status/config.json"
+sed -i 's|"\.\./win_irmao"|"..\\\\\\\\win_irmao"|' "$W/.claude-status/config.json"
+checa "config com '..\\\\irmao' (feito no Windows) vale no Linux" "$SP --raiz $W repos | grep -q 'win_irmao: .*/win_irmao'"
+checa "arquivos gravados com LF (sem CR)" "! grep -lq \$'\\r' $W/STATUS.md $W/CLAUDE.md $W/.claude-status/config.json $W/docs/COMO_USAR_STATUS.md"
+checa "scripts do plugin com LF no .gitattributes (clone no Windows não quebra o bash)" "grep -q '\\*.sh text eol=lf' $PLUGIN/.gitattributes && grep -q 'bin/\\* text eol=lf' $PLUGIN/.gitattributes"
+checa ".gitattributes do projeto com os CSVs em LF (autocrlf do Windows não troca)" "grep -qx 'docs/tempo/\*.csv text eol=lf' $W/.gitattributes || (cd $W && $SP gitattributes >/dev/null && grep -qx 'docs/tempo/\*.csv text eol=lf' $W/.gitattributes)"
+printf '# status-projeto: x\ndocs/tempo/sessoes.csv merge=union\nIDEIAS.md merge=union\nERROS.md merge=union\n' > "$W/.gitattributes"
+checa "reparar aponta o eol=lf faltando e o gitattributes acrescenta uma vez só" "$SP --raiz $W reparar | grep -q 'eol=lf' && (cd $W && $SP gitattributes >/dev/null && $SP gitattributes >/dev/null) && [ \$(grep -c 'eol=lf' $W/.gitattributes) = 1 ]"
+checa "hooks.json chama o bash, não o python3" "! grep -q python3 $PLUGIN/hooks/hooks.json && [ \$(grep -c 'hooks/tempo.sh' $PLUGIN/hooks/hooks.json) = 5 ]"
+
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"
 exit $FALHAS

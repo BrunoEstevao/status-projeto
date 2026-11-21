@@ -109,7 +109,7 @@ def contar_codando(raiz, cfg):
 def main():
     evento = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
-        dados = json.load(sys.stdin)
+        dados = json.loads(c.ler_stdin())
     except Exception:
         dados = {}
     cwd = dados.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
@@ -126,7 +126,7 @@ def main():
     agora = c.agora()
     s_agora = agora.strftime(c.FMT)
     ocioso = timedelta(minutes=float(cfg.get("ocioso_min") or 30))
-    repo = os.path.basename(raiz)
+    repo = c.nome_pasta(raiz)
     avisos = []
 
     trava = open(caminho + ".lock", "w")
@@ -256,6 +256,7 @@ def main():
 
 
 if __name__ == "__main__":
+    c.utf8_io()
     try:
         main()
     except Exception:
