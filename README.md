@@ -63,7 +63,9 @@ existir). Depois disso:
 - **projeto novo:** cria o `STATUS.md` vazio com as 5 fases;
 - **projeto que já existe:** lista antes o status que estiver espalhado em outros arquivos (TODO, PROGRESSO,
   checklists...). Depois analisa o código e o git e preenche o `STATUS.md` com as datas `(desde DD/MM)`, marcando com
-  `(?)` o que não conseguiu comprovar. Também estima as horas passadas pelo git e confere o `.gitignore`;
+  `(?)` o que não conseguiu comprovar. Também estima as horas passadas pelo git e confere o `.gitignore`. Por fim,
+  lista as instruções das fatias em 📦 que contradizem as regras do plugin (onde arquivar, `.gitignore`, onde gerar o
+  relatório) e pergunta se pode corrigir;
 - grava as regras no `CLAUDE.md` (num bloco marcado, sem mexer no resto) e o `.gitattributes`;
 - termina com o guia **"ATENÇÃO — LEIA ANTES DE COMEÇAR"**, que também fica salvo em `docs/COMO_USAR_STATUS.md`.
 

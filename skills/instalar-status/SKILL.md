@@ -34,6 +34,7 @@ Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `
   - Atualizar: `status-projeto atualizar` (migra o config, regrava só o bloco do CLAUDE.md e o guia), depois
     `status-projeto reparar` e trate o que aparecer. Mostre o que mudou do CHANGELOG do plugin
     (`${CLAUDE_PLUGIN_ROOT}/CHANGELOG.md`) entre `versao_plugin_instalada` e `versao_plugin`.
+    Rode também o passo 3b (contradições nas fatias em 📦).
 - `instalado: true` mas incompleto → diga "a instalação anterior parou; continuo de onde parou" e faça **só as etapas
   de `etapas_pendentes`**, na ordem abaixo. Não pergunte de novo o que já está no config.
 - `instalado: false` → instalação nova, a partir do passo 2.
@@ -71,6 +72,19 @@ a morar só no STATUS.md, e pergunte se quer que você tire o status desses arqu
     `- [M] FATIA_NOME — o que é (desde 05/10)` ou `` - [P] `fatias/FATIA_NOME.md` — o que é (desde ?) ``.
   - Mostre o STATUS.md ao usuário e grave. Depois `status-projeto status-md --marcar` (ele mostra avisos de formato:
     corrija o que for seu).
+
+## Passo 3b — contradições nas fatias em 📦 (projeto existente; também no Atualizar)
+Pule em projeto novo. Com o STATUS.md já gravado, rode `status-projeto contradicoes`. Ele lê o arquivo de cada fatia em
+📦 e aponta linhas que contradizem as regras do plugin: **onde arquivar** (a fatia e o relatório vão com `git mv` para a
+pasta das executadas, nunca apagados nem para outra pasta), **.gitignore** (STATUS.md, CLAUDE.md, `docs/tempo/`, o
+guia, o config e as pastas de fatias vão para o git), **onde gerar o relatório** (junto da fatia, na pasta das fatias)
+e **status fora do STATUS.md** (TODO.md, PROGRESSO.md...).
+- Código 0 → diga em uma linha que nenhuma fatia contradiz as regras (e cite as `sem arquivo`, se houver).
+- Código 3 → mostre a lista **inteira** (arquivo:linha, trecho, regra, correção). A detecção é por padrão de texto:
+  leia cada trecho no contexto da fatia e descarte (dizendo que descartou) o que não for instrução de verdade.
+  Pergunte (AskUserQuestion): **Corrigir todas** · **Escolher quais** · **Não corrigir agora**.
+  Só com o sim, edite **apenas aquelas linhas** de cada fatia para seguir a regra (sem reescrever o resto),
+  mostre o `git diff` das fatias e rode `status-projeto contradicoes` de novo para confirmar. Não faça commit.
 
 ## Passo 4 — etapa `estimativa`
 `status-projeto estimar`. Grava `docs/tempo/estimativa_git.csv` uma vez só ("estimado antes da instalação": sessões

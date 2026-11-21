@@ -283,6 +283,137 @@ def cmd_espalhado(a):
             print(f"    · {e}")
 
 
+# ------------------------------------------------------------------- contradições nas fatias em 📦
+
+RE_CAMINHO = re.compile(r"`([^`\s]+)`|(?<![\w`/.-])((?:\.?[\w*.-]+/)+[\w*.-]*|\.?[\w-]+\.(?:md|txt|json|csv)\b)")
+RE_MOVER = re.compile(r"\b(git\s+mv|mv|mov[ae]r?|move[rs]?|arquiv[ae]r?|archive|transfer[ie]r?|levar?|leve)\b", re.I)
+RE_APAGAR = re.compile(r"\b(apag[ae]r?|apague|delet[ae]r?|delete|exclu[ia]r?|exclua|git\s+rm|rm\s+-|remov[ae]r?)\b", re.I)
+RE_OBJ_FATIA = re.compile(r"\b(fatia|slice|este arquivo|esse arquivo|this file|relat[óo]rio|report)", re.I)
+RE_ARQUIVO_DESTINO = re.compile(r"(execut|conclu|done|archiv|arquiv|finaliz|antig|old|histor|feit)", re.I)
+RE_GITIGNORE = re.compile(r"gitignore|n[ãa]o\s+(commit|versione|versionar|suba|subir|envie)|git\s+rm\s+--cached|"
+                          r"don.?t\s+commit|untrack", re.I)
+RE_GERAR = re.compile(r"\b(ger[ae]r?|gere|cri[ae]r?|salv[ae]r?|escrev[ae]r?|grav[ae]r?|generate|write|save|create|"
+                      r"coloc[ae]r?|ponha)\b", re.I)
+RE_RELAT = re.compile(r"relat[óo]rio|report", re.I)
+RE_EXT_DOC = re.compile(r"\.(md|txt|html?|pdf)$", re.I)
+RE_ATUALIZAR = re.compile(r"\b(atualiz[ae]r?|atualize|marc[ae]r?|marque|registr[ae]r?|anot[ae]r?|update|mark|check)\b", re.I)
+
+
+def caminhos_da_linha(linha):
+    out = []
+    for m in RE_CAMINHO.finditer(linha):
+        p = (m.group(1) or m.group(2) or "").strip().strip(".,;:)(\"'")
+        p = re.sub(r"^\./", "", p)
+        if p and not p.startswith(("http:", "https:", "//")) and ("/" in p or "." in p):
+            out.append(p)
+    return out
+
+
+def dentro(caminho, pasta):
+    return caminho.rstrip("/") == pasta or caminho.startswith(pasta + "/")
+
+
+def arquivo_da_fatia(raiz, cfg, item):
+    """Caminho relativo do arquivo .md de um item do STATUS.md (procura na pasta das fatias, na raiz e por nome)."""
+    m = re.search(r"`([^`]+\.md)`", item["texto"])
+    cands = [m.group(1)] if m else []
+    nome = item["nome"]
+    if nome:
+        base = nome if nome.lower().endswith(".md") else nome + ".md"
+        cands += [os.path.join(cfg.get("pasta_fatias", "fatias"), base), base]
+    for cnd in cands:
+        if os.path.isfile(os.path.join(raiz, cnd)):
+            return os.path.normpath(cnd)
+    alvo = c.normaliza(nome)
+    for rel in arquivos_versionados(raiz):
+        if rel.lower().endswith(".md") and c.normaliza(os.path.basename(rel)) == alvo:
+            return rel
+    return ""
+
+
+def contradicoes_linha(linha, cfg):
+    """[(tipo, regra, sugestão)] para uma linha de instrução de uma fatia."""
+    pf = cfg.get("pasta_fatias", "fatias")
+    pe = cfg.get("pasta_fatias_executadas", "fatias_executadas")
+    caminhos = caminhos_da_linha(linha)
+    achou = []
+    # 1. onde arquivar
+    if RE_OBJ_FATIA.search(linha) and RE_APAGAR.search(linha) and not RE_GITIGNORE.search(linha):
+        achou.append(("arquivar", f"ao concluir, a fatia e o relatório vão com `git mv` para `{pe}/` (não são apagados)",
+                      f"trocar por: ao concluir, `git mv` da fatia e do relatório para `{pe}/`"))
+    elif RE_MOVER.search(linha) and (RE_OBJ_FATIA.search(linha) or any(RE_ARQUIVO_DESTINO.search(x) for x in caminhos)):
+        destinos = [x for x in caminhos if RE_ARQUIVO_DESTINO.search(x) and not dentro(x, pe) and not dentro(x, pf)]
+        if destinos:
+            achou.append(("arquivar", f"fatia concluída vai para `{pe}/` (com o relatório dela)",
+                          f"trocar `{destinos[0]}` por `{pe}/`"))
+    # 2. .gitignore
+    if RE_GITIGNORE.search(linha):
+        protegidos = ["STATUS.md", "CLAUDE.md", "docs/tempo", c.GUIA, ".claude-status/config.json", ".claude-status",
+                      ".gitattributes", pf, pe]
+        alvo = [x for x in caminhos if any(dentro(x, pp) or dentro(pp, x.rstrip("/*")) or
+                                            os.path.basename(x.rstrip("/")) == os.path.basename(pp) for pp in protegidos)]
+        if not caminhos and re.search(r"\b(STATUS\.md|CLAUDE\.md|fatias?|relat[óo]rios?|docs/tempo)\b", linha, re.I):
+            alvo = ["(arquivos do status)"]
+        if alvo:
+            achou.append(("gitignore", "STATUS.md, CLAUDE.md, docs/tempo/, o guia, o config e as pastas de fatias "
+                                       "vão para o git (o claude.ai lê pelo GitHub)",
+                          f"tirar a instrução de ignorar/não versionar {', '.join(alvo)}"))
+    # 3. onde gerar o relatório
+    if RE_RELAT.search(linha) and RE_GERAR.search(linha):
+        ruins = [x for x in caminhos if (RE_EXT_DOC.search(x) or x.endswith("/")) and RE_RELAT.search(x)
+                 and not dentro(x, pf)]
+        ruins += [x for x in caminhos if x.endswith("/") and not dentro(x, pf) and x not in ruins
+                  and re.search(r"\bem\s+`?" + re.escape(x), linha)]
+        if ruins:
+            achou.append(("relatorio", f"o relatório da fatia fica junto dela em `{pf}/` (e vai com ela para `{pe}/`)",
+                          f"trocar `{ruins[0]}` por `{pf}/`"))
+    # 4. status fora do STATUS.md
+    if RE_ATUALIZAR.search(linha):
+        outros = [x for x in caminhos if NOMES_STATUS.search(os.path.basename(x)) and os.path.basename(x) != "STATUS.md"]
+        if outros:
+            achou.append(("status", "status só no STATUS.md", f"trocar `{outros[0]}` por `STATUS.md`"))
+    return achou
+
+
+def contradicoes_fatias(raiz, cfg):
+    fases, _ = c.ler_status_arquivo(raiz)
+    if fases is None:
+        return [], []
+    achados, sem_arquivo = [], []
+    for it in fases["📦"]:
+        arq = arquivo_da_fatia(raiz, cfg, it)
+        if not arq:
+            sem_arquivo.append(it["nome"])
+            continue
+        for i, linha in enumerate(ler(os.path.join(raiz, arq)).splitlines(), 1):
+            for tipo, regra, sug in contradicoes_linha(linha, cfg):
+                achados.append({"fatia": it["nome"], "arquivo": arq, "linha": i, "tipo": tipo,
+                                "trecho": linha.strip()[:160], "regra": regra, "sugestao": sug})
+    return achados, sem_arquivo
+
+
+def cmd_contradicoes(a):
+    cfg = precisa_config(a.raiz)
+    achados, sem_arquivo = contradicoes_fatias(a.raiz, cfg)
+    if a.json:
+        print(json.dumps({"contradicoes": achados, "sem_arquivo": sem_arquivo}, ensure_ascii=False, indent=2))
+        return
+    nomes = {"arquivar": "onde arquivar", "gitignore": ".gitignore", "relatorio": "onde gerar o relatório",
+             "status": "status fora do STATUS.md"}
+    if not achados:
+        print("Nenhuma instrução das fatias em 📦 contradiz as regras do plugin.")
+    else:
+        print("Instruções nas fatias em 📦 que contradizem as regras do plugin (nada foi alterado):")
+        for x in achados:
+            print(f"- {x['arquivo']}:{x['linha']} [{nomes[x['tipo']]}] {x['trecho']}")
+            print(f"    regra: {x['regra']}")
+            print(f"    correção: {x['sugestao']}")
+    if sem_arquivo:
+        print("Itens de 📦 sem arquivo de fatia encontrado (não conferidos): " + ", ".join(sem_arquivo))
+    if achados:
+        sys.exit(3)
+
+
 # ------------------------------------------------------------------- estimativa pelo git
 
 def fatia_do_commit(assunto, corpo):
@@ -1224,6 +1355,8 @@ def main():
     x.add_argument("--completar-fases", action="store_true", help="acrescenta só as fases que faltam")
     x.add_argument("--marcar", action="store_true", help="marca a etapa status_md como feita")
     x = s.add_parser("espalhado", help="lista status espalhado em outros arquivos")
+    x.add_argument("--json", action="store_true")
+    x = s.add_parser("contradicoes", help="instruções das fatias em 📦 que contradizem as regras do plugin")
     x.add_argument("--json", action="store_true")
     s.add_parser("estimar", help="estimativa de horas pelo git (uma vez só)")
     x = s.add_parser("claude-md", help="grava o bloco de regras no CLAUDE.md")

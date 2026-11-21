@@ -232,6 +232,41 @@ $SP --raiz "$R" github Dono-Teste/manual > /dev/null
 checa "DONO/REPO informado vai para o guia" "grep -q 'Dono-Teste/manual' $R/docs/COMO_USAR_STATUS.md && ! grep -q '<dono>' $R/docs/COMO_USAR_STATUS.md"
 checa "formato inválido recusado" "! $SP --raiz $R github 'sem barra' 2>/dev/null"
 
+echo "== 7. Contradições nas fatias em 📦"
+F="$BASE/contradicoes"; rm -rf "$F"; mkdir -p "$F/fatias"; git -C "$F" init -q -b main
+( cd "$F" && $SP init --usuario T --valor 150 > /dev/null )
+cat > "$F/STATUS.md" <<'EOF'
+## 🌐 Codando
+## 📦 Fatia pronta, não iniciada
+- [M] `fatias/FATIA_RUIM.md` — contradiz (desde ?)
+- [P] FATIA_SOLTA — na raiz (desde ?)
+- [P] FATIA_LIMPA — segue as regras (desde ?)
+## 🧪 Aguardando teste
+## ⏸️ Bloqueado (externo)
+## ✅ Concluído
+- [P] FATIA_VELHA — fora de 📦, não é conferida (desde 01/10)
+EOF
+cat > "$F/fatias/FATIA_RUIM.md" <<'EOF'
+Gere o relatório em docs/relatorios/FATIA_RUIM_RELATORIO.md.
+Depois mova esta fatia para docs/concluidas/.
+Adicione docs/tempo/ ao .gitignore.
+Marque como feito no TODO.md.
+EOF
+printf 'Ao terminar, apague esta fatia.\nNão commite o STATUS.md.\n' > "$F/FATIA_SOLTA.md"
+cat > "$F/fatias/FATIA_LIMPA.md" <<'EOF'
+Tela de relatório em src/pages/relatorio.tsx.
+Crie o relatório em `fatias/RELATORIO_LIMPA.md` e ao concluir `git mv` para fatias_executadas/.
+Coloque node_modules/ no .gitignore.
+EOF
+printf 'Depois apague esta fatia.\n' > "$F/fatias/FATIA_VELHA.md"
+CT="$($SP --raiz "$F" contradicoes --json)"; ( $SP --raiz "$F" contradicoes > /dev/null ); rc=$?
+tipos() { python3 -c "import json,sys;d=json.load(sys.stdin);print(' '.join(sorted(f\"{x['arquivo']}:{x['linha']}:{x['tipo']}\" for x in d['contradicoes'])))"; }
+checa "acha as 6 contradições (arquivar, .gitignore, relatório, status)" "[ \"\$(tipos <<<\"\$CT\")\" = 'FATIA_SOLTA.md:1:arquivar FATIA_SOLTA.md:2:gitignore fatias/FATIA_RUIM.md:1:relatorio fatias/FATIA_RUIM.md:2:arquivar fatias/FATIA_RUIM.md:3:gitignore fatias/FATIA_RUIM.md:4:status' ]"
+checa "fatia que segue as regras e fatia fora de 📦 não aparecem" "! grep -q 'LIMPA\|VELHA' <<<\"\$CT\""
+checa "sai com código 3 e não altera as fatias" "[ $rc = 3 ] && grep -q 'apague' $F/FATIA_SOLTA.md"
+printf 'Ao concluir, git mv para fatias_executadas/.\n' > "$F/FATIA_SOLTA.md"; printf 'ok\n' > "$F/fatias/FATIA_RUIM.md"
+checa "depois de corrigidas, código 0" "$SP --raiz $F contradicoes > /dev/null"
+
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"
 exit $FALHAS
