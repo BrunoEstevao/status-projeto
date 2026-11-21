@@ -772,10 +772,13 @@ def montar_guia(raiz, cfg):
 def cmd_guia(a):
     raiz = a.raiz
     cfg = precisa_config(raiz)
+    if a.marcar and not a.gravar:
+        sair("--marcar só junto com --gravar (a etapa guia é gravar o arquivo).")
     texto = montar_guia(raiz, cfg)
-    escrever(os.path.join(raiz, c.GUIA), texto)
-    if a.marcar:
-        marcar(raiz, cfg, "guia")
+    if a.gravar:  # mostrar é o padrão; gravar só quando pedido (o /instalar-status pede)
+        escrever(os.path.join(raiz, c.GUIA), texto)
+        if a.marcar:
+            marcar(raiz, cfg, "guia")
     print(texto)
 
 
@@ -821,10 +824,7 @@ def diagnostico(raiz, cfg):
 
 def cmd_reparar(a):
     raiz = a.raiz
-    cfg = precisa_config(raiz)
-    cfg, mudou = c.migrar(cfg)
-    if mudou:
-        c.gravar_config(raiz, cfg)
+    cfg = precisa_config(raiz)  # só consulta: o config já vem migrado na memória, nada é gravado
     falta = diagnostico(raiz, cfg)
     if a.json:
         print(json.dumps([{"etapa": e, "motivo": m} for e, m in falta], ensure_ascii=False))
@@ -860,7 +860,7 @@ def cmd_atualizar(a):
             print(f"{c.GUIA} regenerado.")
         else:
             print(f"{c.GUIA} NÃO regenerado: falta DONO/REPO do GitHub (pergunte ao usuário e rode "
-                  "`status-projeto github DONO/REPO`, depois `status-projeto guia`).")
+                  "`status-projeto github DONO/REPO`, depois `status-projeto guia --gravar`).")
     print("STATUS.md, sessoes.csv e estimativa_git.csv não foram tocados.")
 
 
@@ -1413,8 +1413,9 @@ def main():
     s.add_parser("gitattributes", help="merge=union no sessoes.csv")
     x = s.add_parser("gitignore", help="confere (e com --corrigir, ajusta) o .gitignore")
     x.add_argument("--corrigir", action="store_true")
-    x = s.add_parser("guia", help="grava docs/COMO_USAR_STATUS.md e mostra o bloco ATENÇÃO")
-    x.add_argument("--marcar", action="store_true")
+    x = s.add_parser("guia", help="mostra o bloco ATENÇÃO (com --gravar, grava docs/COMO_USAR_STATUS.md)")
+    x.add_argument("--gravar", action="store_true", help="grava o guia em docs/COMO_USAR_STATUS.md")
+    x.add_argument("--marcar", action="store_true", help="com --gravar, marca a etapa guia como feita")
     x = s.add_parser("etapa", help="marca uma etapa como feita")
     x.add_argument("nome")
     x.add_argument("--valor", default=None)

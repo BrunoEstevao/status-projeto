@@ -22,7 +22,7 @@ instalar() {  # simula as etapas mecânicas do /instalar-status
     $SP init --usuario "Pessoa Teste" --valor 150 --pasta-fatias fatias "$@" &&
     { [ -f STATUS.md ] && $SP status-md --marcar || $SP status-md --vazio --marcar; } &&
     $SP estimar && $SP claude-md && $SP hooks && $SP gitattributes &&
-    $SP gitignore --corrigir && $SP guia --marcar > /dev/null ) 2>&1 | sed 's/^/    | /'
+    $SP gitignore --corrigir && $SP guia --gravar --marcar > /dev/null ) 2>&1 | sed 's/^/    | /'
 }
 assinatura() {  # hash dos arquivos que a 2ª instalação não pode mudar
   ( cd "$1" && sha256sum STATUS.md docs/tempo/sessoes.csv docs/tempo/estimativa_git.csv CLAUDE.md .gitattributes \
@@ -225,10 +225,10 @@ git -C "$R" remote add upstream git@github-zapai:Dono-Teste/sem_remote.git   # s
 ( cd "$R" && $SP init --usuario T --valor 150 > /dev/null )
 checa "sem origin, usa o outro remote" "[ \"\$($SP --raiz $R github)\" = Dono-Teste/sem_remote ]"
 git -C "$R" remote set-url upstream /srv/git/sem_remote.git
-( cd "$R" && $SP guia --marcar > /dev/null 2>&1 ); rc=$?
+( cd "$R" && $SP guia --gravar --marcar > /dev/null 2>&1 ); rc=$?
 checa "remote ilegível: guia sai com código 4 e não grava <dono>" "[ $rc = 4 ] && [ ! -e $R/docs/COMO_USAR_STATUS.md ]"
 $SP --raiz "$R" github Dono-Teste/manual > /dev/null
-( cd "$R" && $SP guia --marcar > /dev/null )
+( cd "$R" && $SP guia --gravar --marcar > /dev/null )
 checa "DONO/REPO informado vai para o guia" "grep -q 'Dono-Teste/manual' $R/docs/COMO_USAR_STATUS.md && ! grep -q '<dono>' $R/docs/COMO_USAR_STATUS.md"
 checa "formato inválido recusado" "! $SP --raiz $R github 'sem barra' 2>/dev/null"
 
@@ -298,6 +298,26 @@ for l in open(sys.argv[1], encoding='utf-8'):
 sys.exit(0 if sum('Aguardando teste' in l for l in fora) == 1 and not dentro else 1)
 PY"
 checa "instruções do claude.ai sem ' | ' (viravam linha de tabela)" "! grep -q ' | 🧪' $V/docs/COMO_USAR_STATUS.md"
+
+echo "== 9. Comandos de consulta não gravam nada em disco"
+foto() { ( cd "$H" && find . -path ./.git -prune -o -type f -print0 | sort -z | xargs -0 sha256sum ); }
+velho() {  # guia apagado e config antigo: o que gravar sem pedir aparece na foto
+  rm -f "$H/docs/COMO_USAR_STATUS.md"
+  python3 - "$H/.claude-status/config.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+for k in ("repo_github", "contradicoes_ignoradas", "ocioso_min"): d.pop(k, None)
+json.dump(d, open(p, "w"))
+PY
+}
+for cmd in relatorio "relatorio --todos" historico cronograma resumo ajuda contradicoes "contradicoes --json" \
+           "contradicoes --ignoradas" guia estado espalhado github verificar reparar; do
+  velho; F1="$(foto)"; $SP --raiz "$H" $cmd > /dev/null 2>&1; F2="$(foto)"
+  checa "$cmd não grava" '[ "$F1" = "$F2" ]'
+done
+velho; ( cd "$H" && $SP guia --gravar > /dev/null )
+checa "guia --gravar grava o arquivo" "[ -s $H/docs/COMO_USAR_STATUS.md ]"
+checa "guia --marcar sem --gravar é recusado" "! $SP --raiz $H guia --marcar 2>/dev/null"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

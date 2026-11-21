@@ -5,6 +5,15 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.3.0] — 2026-11-20
+### Mudado
+- `status-projeto guia` só mostra o guia. Para gravar `docs/COMO_USAR_STATUS.md` é preciso `--gravar` (o
+  `/instalar-status` usa `guia --gravar --marcar`); `--marcar` sem `--gravar` é recusado. Antes, rodar o `guia` só
+  para consultar regravava o arquivo do projeto.
+- `reparar` não grava mais o config (só lista o que falta). O teste confere que os comandos de consulta (`relatorio`,
+  `historico`, `cronograma`, `resumo`, `ajuda`, `contradicoes` sem `--ignorar`, `guia`, `estado`, `espalhado`,
+  `github`, `verificar`, `reparar`) não mudam nenhum arquivo, nem com o guia apagado e o config antigo.
+
 ## [1.2.0] — 2026-11-20
 ### Adicionado
 - `status-projeto contradicoes --ignorar ID [--obs motivo]`: marca um apontamento como falso positivo. Fica em

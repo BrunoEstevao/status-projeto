@@ -115,7 +115,7 @@ explique a linha que precisa mudar e pergunte antes de editar.
    **código 4** (não deu para saber), **pergunte ao usuário** (AskUserQuestion, com o remote mostrado na mensagem como
    contexto) qual é o repositório no GitHub no formato `DONO/REPO` e grave com `status-projeto github DONO/REPO`.
    **Nunca** escreva `<dono>` nem invente o dono. O `guia` e o `atualizar` também param com código 4 / aviso se faltar.
-1. `status-projeto guia --marcar` (regrava o guia com a lista de (?) atual) grava `docs/COMO_USAR_STATUS.md` e imprime o bloco **"⚠️ ATENÇÃO — LEIA ANTES DE
+1. `status-projeto guia --gravar --marcar` (regrava o guia com a lista de (?) atual; sem `--gravar` só mostra) grava `docs/COMO_USAR_STATUS.md` e imprime o bloco **"⚠️ ATENÇÃO — LEIA ANTES DE
    COMEÇAR"**. Mostre esse bloco **inteiro** ao usuário, sem resumir (ele já traz como funciona, frases, comandos,
    fases, os passos manuais com o texto das instruções do claude.ai com o nome do repo, a frase de teste e os itens (?)).
 2. Mostre `git status --short` com o que a instalação criou/alterou e diga: "para eu fazer commit e push, escreva
