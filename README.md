@@ -154,11 +154,23 @@ descontando o tempo em que dois repos andaram juntos. Um repo irmão sem o plugi
 
 ## Atualizar o plugin
 
+**Pelo terminal** (a forma que a documentação do Claude Code dá para atualizar), dentro da pasta do projeto:
+
+```bash
+claude plugin marketplace update status-projeto
+claude plugin update status-projeto@status-projeto
 ```
-/plugin marketplace update status-projeto
-/plugin update status-projeto@status-projeto
-/reload-plugins
-```
+
+O primeiro comando só baixa o catálogo novo e não troca a versão instalada; quem atualiza é o segundo. Sem `--scope`, o
+`update` atualiza a instalação mais específica da pasta onde você está (local → projeto → usuário). O plugin pode
+estar instalado em mais de um escopo: o `/instalar-status` registra o plugin no `.claude/settings.json` do projeto.
+Para escolher um escopo, use `--scope project` ou `--scope user`, e rode o comando uma vez para cada instalação.
+Versões antigas do Claude Code assumiam `user` quando faltava o `--scope`; na dúvida, passe o `--scope`.
+
+**Dentro da sessão:** `/plugin` → aba **Installed** → `status-projeto` → **Update now**. (Digitar `/plugin update ...`
+com argumentos pode só abrir esse gerenciador, sem atualizar nada.)
+
+Depois, numa sessão que já estava aberta, rode `/reload-plugins`. Até lá, os hooks continuam rodando da versão antiga.
 
 Depois rode `/instalar-status` em cada projeto e escolha **Atualizar**. Isso completa o config com os campos novos e
 regrava só o bloco de regras do `CLAUDE.md` e o guia. O `STATUS.md`, o `sessoes.csv` e a estimativa nunca são tocados.

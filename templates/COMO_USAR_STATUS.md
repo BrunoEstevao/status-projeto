@@ -51,6 +51,15 @@ Esqueceu um teste aberto? Na próxima mensagem o Claude pergunta se terminou e a
 
 Os nomes completos são `/status-projeto:<comando>` (use se outro plugin tiver um comando com o mesmo nome).
 
+## Atualizar o plugin
+No terminal, dentro da pasta do projeto (o plugin está registrado no escopo do projeto):
+
+    claude plugin marketplace update status-projeto
+    claude plugin update status-projeto@status-projeto --scope project
+
+Dentro da sessão: `/plugin` → aba **Installed** → `status-projeto` → **Update now** (digitar `/plugin update ...` com
+argumentos pode só abrir o gerenciador). Depois rode `/reload-plugins` e `/instalar-status` → **Atualizar**.
+
 ## Fatias
 - Fatia nova: `{{pasta_fatias}}/FATIA_<NOME>.md` e um item em 📦 com o tamanho.
 - Ao mandar codar, o Claude procura o arquivo em `{{pasta_fatias}}/` e na raiz. Achou só na raiz: move para `{{pasta_fatias}}/`.

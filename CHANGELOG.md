@@ -5,6 +5,22 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.4.0] — 2026-11-20
+### Adicionado
+- STATUS.md com fases fora do padrão (ex.: `🔨 Em execução` no lugar de `🌐 Codando`): o `estado` lista essas seções
+  em `status_md.fases_extras`, com a fase sugerida, e `status-projeto status-md --ajustar "Título=🌐"` troca o título
+  pela fase padrão. Os itens vão juntos para a fase padrão sem perder nenhum, as 5 fases ficam na ordem e as que
+  faltam são acrescentadas. Rodar de novo não muda nada. Antes, os itens dessas seções ficavam invisíveis para os hooks.
+### Mudado
+- `/instalar-status`: em toda pergunta de múltipla escolha, a opção recomendada vem primeiro, com "(Recomendado)" e
+  o motivo em uma linha. Quando a escolha depende de algo que só o usuário sabe (nome, valor da hora, autores na
+  estimativa, DONO/REPO), nenhuma vem recomendada e a pergunta diz do que depende. Com fases fora do padrão, a
+  recomendada é "Ajustar ao formato".
+### Corrigido
+- README e guia: atualizar pelo terminal com `claude plugin update status-projeto@status-projeto` (com `--scope`
+  quando houver mais de uma instalação) ou, dentro da sessão, pelo `/plugin` → Installed → Update now. Digitar
+  `/plugin update ...` com argumentos pode só abrir o gerenciador.
+
 ## [1.3.0] — 2026-11-20
 ### Mudado
 - `status-projeto guia` só mostra o guia. Para gravar `docs/COMO_USAR_STATUS.md` é preciso `--gravar` (o

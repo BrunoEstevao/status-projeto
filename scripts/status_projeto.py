@@ -144,6 +144,93 @@ def projeto_e_novo(raiz):
     return len(arquivos) == 0
 
 
+# palavras do título de uma fase fora do padrão → fase padrão equivalente (a ordem importa: "aguardando teste"
+# é 🧪 antes de ser ⏸️; "fatia pronta, não iniciada" é 📦 antes de ser ✅)
+SINONIMOS_FASE = [
+    ("🧪", r"test|valida|homolog|review|revis[ãa]o|\bqa\b"),
+    ("⏸️", r"bloque|block|pausad|parad|esperando|aguardando|externo|on hold"),
+    ("📦", r"n[ãa]o\s+iniciad|fila|backlog|a\s+fazer|to\s*do|pr[óo]xim|planejad|pendente|prontas?\s+para|ready"),
+    ("🌐", r"execu|andamento|codando|fazendo|doing|progress|desenvolv|wip|ativ|trabalhando|agora"),
+    ("✅", r"conclu|feit[oa]|done|finaliz|entregue|pronto|encerrad|arquivad"),
+]
+
+
+def secoes_status(texto):
+    """[(titulo_ou_None, linhas)]: o preâmbulo vem com título None; cada '## ' abre uma seção."""
+    secoes = [(None, [])]
+    for l in texto.splitlines():
+        if l.startswith("## "):
+            secoes.append((l, []))
+        else:
+            secoes[-1][1].append(l)
+    return secoes
+
+
+def sugerir_fase(titulo):
+    t = re.sub(r"^##\s*", "", titulo).lower()
+    for e, padrao in SINONIMOS_FASE:
+        if re.search(padrao, t):
+            return e
+    return ""
+
+
+def fases_extras(raiz):
+    """Seções '## ' do STATUS.md que não são uma das 5 fases (os hooks e as regras não enxergam os itens delas)."""
+    texto = ler(os.path.join(raiz, "STATUS.md"))
+    out = []
+    for tit, linhas in secoes_status(texto)[1:]:
+        if c.RE_FASE.match(tit):
+            continue
+        itens = sum(1 for l in linhas if l.startswith("- "))
+        if itens or sugerir_fase(tit):  # seção de notas sem itens e sem cara de fase fica de fora
+            out.append({"titulo": tit[3:].strip(), "itens": itens, "sugestao": sugerir_fase(tit)})
+    return out
+
+
+def ajustar_status(texto, mapa):
+    """Troca os títulos de `mapa` ({titulo: emoji}) pela fase padrão, junta seções da mesma fase (itens da seção
+    trocada vão para o fim da fase que já existia, sem o '(nada agora)'), põe as 5 fases na ordem e acrescenta as
+    que faltarem. Outras seções e o preâmbulo ficam como estão. Rodar de novo não muda nada."""
+    secoes = secoes_status(texto)
+    preambulo, resto = secoes[0][1], secoes[1:]
+    fases, outras, posicao = {}, [], None
+    for i, (tit, linhas) in enumerate(resto):
+        nome = tit[3:].strip()
+        m = c.RE_FASE.match(tit)
+        e = c.emoji_fase(m.group(1)) if m else mapa.get(nome, "")
+        if not e:
+            outras.append((tit, linhas))
+            continue
+        posicao = len(outras) if posicao is None else posicao
+        corpo = [l for l in linhas]
+        if e in fases:
+            base = fases[e][1]
+            novos = [l for l in corpo if l.strip() and l.strip() != "(nada agora)"]
+            if novos:
+                base[:] = [l for l in base if l.strip() != "(nada agora)"]
+                while base and not base[-1].strip():
+                    base.pop()
+                base += novos + [""]
+        else:
+            titulo = tit if m else f"## {e} {dict(c.FASES)[e]}"
+            fases[e] = (titulo, corpo)
+    for e, nome in c.FASES:
+        if e not in fases:
+            fases[e] = (f"## {e} {nome}", ["(nada agora)", ""])
+    posicao = 0 if posicao is None else posicao
+    ordem = outras[:posicao] + [fases[e] for e, _ in c.FASES] + outras[posicao:]
+    linhas = list(preambulo)
+    for tit, corpo in ordem:
+        linhas.append(tit)
+        corpo = list(corpo)
+        while len(corpo) > 1 and not corpo[-1].strip() and not corpo[-2].strip():
+            corpo.pop()
+        if corpo and corpo[-1].strip():
+            corpo.append("")
+        linhas += corpo
+    return "\n".join(linhas).rstrip("\n") + "\n"
+
+
 def fases_faltando(raiz):
     fases, presentes = c.ler_status_arquivo(raiz)
     if fases is None:
@@ -179,7 +266,8 @@ def cmd_estado(a):
         },
         "projeto_novo": projeto_e_novo(raiz),
         "status_md": {"existe": os.path.exists(os.path.join(raiz, "STATUS.md")),
-                      "fases_faltando": fases_faltando(raiz)},
+                      "fases_faltando": fases_faltando(raiz),
+                      "fases_extras": fases_extras(raiz) if os.path.exists(os.path.join(raiz, "STATUS.md")) else []},
         "claude_md": {"existe": bool(claude_md), "tem_bloco": MARCA_INI in claude_md,
                       "regras_antigas_fora_do_bloco": conflitos_claude_md(claude_md)},
         "sessoes_csv": os.path.exists(os.path.join(raiz, c.CSV_SESSOES)),
@@ -229,6 +317,25 @@ def cmd_status_md(a):
     falta = fases_faltando(raiz)
     if falta is None:
         sair("STATUS.md não existe.")
+    if a.ajustar:
+        mapa = {}
+        for par in a.ajustar:
+            tit, _, e = par.rpartition("=")
+            e = c.emoji_fase(e.strip())
+            if not tit.strip() or e not in dict(c.FASES):
+                sair(f"Use --ajustar \"Título da seção=🌐\" (fase: {' '.join(x for x, _ in c.FASES)}). Recebido: {par}")
+            mapa[re.sub(r"^##\s*", "", tit.strip())] = e
+        nomes = {x["titulo"] for x in fases_extras(raiz)}
+        for t in mapa:
+            if t not in nomes:
+                sair(f"Seção '{t}' não encontrada entre as fases fora do padrão: {', '.join(sorted(nomes)) or 'nenhuma'}.")
+        antes = ler(p)
+        novo = ajustar_status(antes, mapa)
+        if novo != antes:
+            escrever(p, novo)
+            print("STATUS.md ajustado ao formato (itens mantidos): "
+                  + "; ".join(f"'{t}' → {e} {dict(c.FASES)[e]}" for t, e in mapa.items()))
+        falta = fases_faltando(raiz)
     if falta and a.completar_fases:
         texto = ler(p).rstrip("\n") + "\n"
         for e, nome in c.FASES:
@@ -1397,6 +1504,8 @@ def main():
     x = s.add_parser("status-md", help="cria (vazio) ou confere o STATUS.md")
     x.add_argument("--vazio", action="store_true", help="cria o STATUS.md com as 5 fases se não existir")
     x.add_argument("--completar-fases", action="store_true", help="acrescenta só as fases que faltam")
+    x.add_argument("--ajustar", action="append", metavar="TITULO=FASE",
+                   help="troca uma seção fora do padrão pela fase padrão, juntando os itens (pode repetir)")
     x.add_argument("--marcar", action="store_true", help="marca a etapa status_md como feita")
     x = s.add_parser("espalhado", help="lista status espalhado em outros arquivos")
     x.add_argument("--json", action="store_true")

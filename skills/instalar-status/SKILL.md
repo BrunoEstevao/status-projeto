@@ -19,6 +19,13 @@ Argumentos recebidos: `$ARGUMENTS` (podem trazer `usuario=`, `valor=`, `pasta=`;
 - **Nunca** faça commit nem push sem o usuário escrever **"pode commitar"**.
 - Não leia nem copie segredos (`.env`, chaves). O que não der para comprovar pelo código/git: `(?)`.
 
+## Como perguntar (toda AskUserQuestion deste instalador)
+- A opção **recomendada vem primeiro**, com **"(Recomendado)" no fim do rótulo**, e a descrição dela é **o motivo
+  em uma linha**. As outras opções dizem, na descrição, o que acontece se forem escolhidas.
+- Quando a escolha depende de algo que só o usuário sabe, **não marque nenhuma como recomendada**: escreva na própria
+  pergunta do que ela depende (ex.: "depende de os outros autores fazerem parte do mesmo custo").
+- Abaixo, cada pergunta já traz a ordem, a recomendada e o motivo. Não invente outra recomendação.
+
 ## Passo 0 — diagnóstico
 Rode `status-projeto estado` e leia o JSON (instalado, etapas_feitas, etapas_pendentes, precisa_atualizar, git,
 projeto_novo, status_md, claude_md, pastas_fatias_detectadas, fatias_soltas_na_raiz, hooks_manuais_antigos).
@@ -26,9 +33,14 @@ Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `
 
 ## Passo 1 — já instalado?
 - `instalacao_completa: true` → **não reinstale.** Se os argumentos trouxerem `sair`, `verificar`, `reparar` ou
-  `atualizar`, use essa escolha sem perguntar. Senão, pergunte (AskUserQuestion) o que fazer:
-  **Sair** · **Verificar** (rode o /verificar-integracao: `status-projeto verificar`) · **Reparar** (só o que falta) ·
-  **Atualizar** (se `precisa_atualizar`, recomende esta).
+  `atualizar`, use essa escolha sem perguntar. Senão, rode `status-projeto reparar` (só consulta) e pergunte
+  (AskUserQuestion) o que fazer. A recomendada é a primeira que valer, nesta ordem:
+  1. `precisa_atualizar` → **Atualizar (Recomendado)** — motivo: "instalado com a X, o plugin está na Y".
+  2. `reparar` listou algo → **Reparar (Recomendado)** — motivo: o que falta, em poucas palavras.
+  3. Nada disso → **Verificar (Recomendado)** — motivo: "confere se os hooks estão gravando e o GitHub está em dia,
+     sem mudar nada".
+  Depois da recomendada, as demais entre **Atualizar** · **Reparar** (só o que falta) · **Verificar**
+  (rode o /verificar-integracao: `status-projeto verificar`), e **Sair** por último.
   - Reparar: `status-projeto reparar` lista o que falta ou quebrou; refaça **só esses itens** seguindo o passo
     correspondente abaixo. Nunca recrie STATUS.md por cima; se ele sumiu, ofereça restaurar do git.
   - Atualizar: `status-projeto atualizar` (migra o config, regrava só o bloco do CLAUDE.md e o guia), depois
@@ -41,23 +53,45 @@ Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `
 
 ## Passo 2 — perguntas (só na primeira vez)
 Uma AskUserQuestion com até 3 perguntas (pule as que vieram nos argumentos):
-1. **Nome do usuário** (como as regras vão chamar a pessoa que testa e decide). Sugira o `git config user.name`.
-2. **Valor da hora** — padrão **150** (R$). Opções: 150 (Recomendado), 100, 200.
-3. **Pasta das fatias** — se `pastas_fatias_detectadas` não estiver vazia, a primeira detectada é a recomendada;
-   senão, `fatias`. A pasta das concluídas é `<pasta>_executadas` (ou a existente, ex.: `fatias_executadas`).
-Se `git.autores` mostrar mais de uma pessoa, pergunte também se a estimativa conta só os commits do usuário
-(`--autor "Nome"`) ou todos. Se o usuário citar repos irmãos do mesmo projeto, use `--repo ../outro` (pode repetir).
+1. **Nome do usuário** (como as regras vão chamar a pessoa que testa e decide). Só o usuário sabe: sem recomendada.
+   Primeira opção: o `git config user.name` (descrição: "o nome dos seus commits"); "Other" para outro nome.
+2. **Valor da hora** (R$). Só o usuário sabe: sem recomendada; diga na pergunta que depende do valor que ele cobra
+   ou quer usar como referência, e que vale só daqui para frente (muda com /status-valor). Opções:
+   **150 (padrão do plugin)**, 100, 200.
+3. **Pasta das fatias** — se `pastas_fatias_detectadas` não estiver vazia: **`<primeira detectada>` (Recomendado)** —
+   motivo: "já tem N arquivos de fatia". Senão: **`fatias` (Recomendado)** — motivo: "é o nome que as regras e as
+   instruções do claude.ai usam por padrão". A pasta das concluídas é `<pasta>_executadas` (ou a existente, ex.:
+   `fatias_executadas`).
+Se `git.autores` mostrar mais de uma pessoa, pergunte também se a estimativa conta **só os commits do usuário**
+(`--autor "Nome"`) ou **todos**. Sem recomendada: depende de os outros autores fazerem parte do mesmo projeto/custo
+(cite na pergunta os autores e o número de commits de cada um). Se o usuário citar repos irmãos do mesmo projeto, use `--repo ../outro` (pode repetir).
 Depois: `status-projeto init --usuario "<nome>" --valor <valor> --pasta-fatias <pasta> [--pasta-executadas X] [--autor A] [--repo ../R]`.
 
 ## Passo 3 — etapa `status_md`
 **Antes de mexer em qualquer coisa**, rode `status-projeto espalhado` e mostre a lista de arquivos com status
 espalhado (TODO, PROGRESSO, checklists, "concluído"...). Não apague nada: só informe que, pela regra, o status passa
-a morar só no STATUS.md, e pergunte se quer que você tire o status desses arquivos depois (não faça agora sem ordem).
+a morar só no STATUS.md, e pergunte (AskUserQuestion) o que fazer com esses arquivos — não faça agora sem ordem:
+**Tirar o status desses arquivos depois (Recomendado)** — motivo: "duas fontes de status ficam diferentes com o
+tempo, e o claude.ai só lê o STATUS.md" · **Deixar como está** — descrição: "escolha se outras pessoas ou
+ferramentas usam esses arquivos". Se algum deles for de fatia, lembre que o passo 3b confere as fatias em 📦.
 
 - **Projeto novo** (`projeto_novo: true`): `status-projeto status-md --vazio --marcar`.
-- **STATUS.md já existe**: não sobrescreva. Se `status_md.fases_faltando` não estiver vazio, mostre e pergunte se pode
-  acrescentar só as fases que faltam (`status-projeto status-md --completar-fases --marcar`). Se já tiver as 5,
-  `status-projeto status-md --marcar`.
+- **STATUS.md já existe**: não sobrescreva.
+  - **Fases fora do padrão** (`status_md.fases_extras` não vazio; ex.: `🔨 Em execução` no lugar de `🌐 Codando`):
+    mostre cada uma com a fase sugerida (`sugestao`; vazia → proponha você pelo sentido, ou deixe de fora se for
+    seção de notas) e quantos itens tem. Pergunte (AskUserQuestion):
+    **Ajustar ao formato (Recomendado)** — motivo: "os hooks leem o nome da fatia da fase 🌐, o limite de 3 vale
+    para ela e as instruções do claude.ai citam só as 5 fases padrão" ·
+    **Só acrescentar as fases que faltam** — descrição: "deixa duas fases com o mesmo papel (ex.: 🔨 e 🌐), e os
+    itens da fora do padrão ficam invisíveis para os hooks" · **Não mexer agora**.
+    Ajustar: `status-projeto status-md --ajustar "🔨 Em execução=🌐" [--ajustar "Título=✅" ...] --marcar` (troca o
+    título, junta os itens na fase padrão sem perder nenhum, põe as 5 na ordem e acrescenta as que faltam; o resto
+    do arquivo fica igual). Mostre o `git diff STATUS.md`.
+    Só acrescentar: `status-projeto status-md --completar-fases --marcar`.
+  - **Só faltam fases** (`fases_faltando` não vazio, sem `fases_extras`): pergunte
+    **Acrescentar as fases que faltam (Recomendado)** — motivo: "as regras e os hooks contam com as 5; nada do que
+    existe é mexido" · **Não mexer agora**. Sim → `status-projeto status-md --completar-fases --marcar`.
+  - Já tem as 5 e nada fora do padrão: `status-projeto status-md --marcar`.
 - **Projeto existente sem STATUS.md**: analise o código e o git e **escreva o STATUS.md** no formato do template
   (`${CLAUDE_PLUGIN_ROOT}/templates/STATUS.md`):
   - Fontes: `git log --all --date=short --format='%ad %h %s'` (e `--stat` onde precisar), branches e tags, arquivos
@@ -82,8 +116,10 @@ e **status fora do STATUS.md** (TODO.md, PROGRESSO.md...).
 - Código 0 → diga em uma linha que nenhuma fatia contradiz as regras (e cite as `sem arquivo`, se houver).
 - Código 3 → mostre a lista **inteira** (arquivo:linha, trecho, regra, correção). A detecção é por padrão de texto:
   leia cada trecho no contexto da fatia e descarte (dizendo que descartou) o que não for instrução de verdade.
-  Pergunte (AskUserQuestion): **Corrigir todas** · **Escolher quais** · **Marcar como ignorado (falso positivo)** ·
-  **Não corrigir agora**. Falso positivo (seu ou do usuário) → `status-projeto contradicoes --ignorar ID --obs "motivo"`
+  Pergunte (AskUserQuestion): **Corrigir todas (Recomendado)** — motivo: "na hora de executar, o Claude segue a
+  instrução da fatia, então ela faria o contrário da regra" · **Escolher quais** · **Marcar como ignorado (falso
+  positivo)** · **Não corrigir agora**. Se você mesmo achar que algum apontamento é falso positivo, diga qual e por
+  quê antes da pergunta, e aí recomende **Escolher quais** — motivo: "N parecem falso positivo". Falso positivo (seu ou do usuário) → `status-projeto contradicoes --ignorar ID --obs "motivo"`
   (o id aparece no começo de cada apontamento; fica em `contradicoes_ignoradas` no config e não volta nas próximas
   rodadas, enquanto o texto da linha não mudar). `--ignoradas` lista; `--desfazer ID` faz voltar a valer.
   Só com o sim, edite **apenas aquelas linhas** de cada fatia para seguir a regra (sem reescrever o resto),
@@ -95,25 +131,31 @@ com mais de 2 h entre commits, +30 min antes do primeiro commit). Se o comando d
 
 ## Passo 5 — etapa `claude_md`
 `status-projeto claude-md`. Se sair com código 3 (regras antigas de status/tempo fora do bloco), mostre as seções
-achadas e pergunte: **trocar as antigas pelo bloco do plugin** (aí você mesmo remove do CLAUDE.md só aquelas seções,
-mostra o diff e roda de novo) ou **gravar o bloco mesmo assim** (`--mesmo-assim`) ou **pular**.
+achadas e pergunte (AskUserQuestion): **Trocar as antigas pelo bloco do plugin (Recomendado)** — motivo: "duas regras
+de status no CLAUDE.md se contradizem e o Claude pode seguir a antiga" (aí você mesmo remove do CLAUDE.md só aquelas
+seções, mostra o diff e roda de novo) · **Gravar o bloco mesmo assim** (`--mesmo-assim`) — descrição: "as duas
+regras ficam valendo" · **Pular**. Se alguma seção achada tiver regra que não é de status/tempo (ex.: convenção de
+commit), diga que ela fica e que você só tira a parte de status.
 
 ## Passo 6 — etapa `hooks`
 `status-projeto hooks`. Os hooks vêm do próprio plugin; o comando registra o plugin no `.claude/settings.json` do
 projeto (para quem abrir o repo, inclusive no Claude Code na web). Se avisar de **hooks manuais antigos**, mostre e
-pergunte se pode tirá-los (senão a mesma sessão conta duas vezes); só edite com o sim.
+pergunte (AskUserQuestion): **Tirar os hooks antigos (Recomendado)** — motivo: "a mesma sessão seria contada duas vezes
+no relatório" · **Manter**. Só edite com o sim. Se o hook antigo fizer mais coisa além de medir tempo, não recomende:
+diga que depende de o usuário ainda precisar dessa outra função e proponha tirar só a parte do tempo.
 
 ## Passo 7 — etapas `gitattributes` e `gitignore`
 `status-projeto gitattributes`, depois `status-projeto gitignore` (ele já ignora sozinho a trava e o estado local,
-que é seguro). Se apontar arquivos do status que estão ignorados, mostre e, com o ok do usuário (ou se os argumentos
-disserem que pode corrigir o .gitignore), `status-projeto gitignore --corrigir`. Se continuar com problema (pasta-mãe inteira ignorada),
+que é seguro). Se apontar arquivos do status que estão ignorados, mostre e pergunte (AskUserQuestion), a não ser que
+os argumentos já digam que pode corrigir: **Corrigir o .gitignore (Recomendado)** — motivo: "o claude.ai lê o
+status pelo GitHub, e arquivo ignorado não sobe" · **Não corrigir**. Sim → `status-projeto gitignore --corrigir`. Se continuar com problema (pasta-mãe inteira ignorada),
 explique a linha que precisa mudar e pergunte antes de editar.
 
 ## Passo 8 — etapa `guia` e fechamento (sempre, também em continuar/reparar/atualizar/verificar)
 0. Rode `status-projeto github`. Ele lê o DONO/REPO do remote (`origin`, ou o único remote; aceita qualquer host antes
    dos dois-pontos, inclusive apelidos do `~/.ssh/config` como `git@github-zapai:Dono/repo.git`). Se sair com
    **código 4** (não deu para saber), **pergunte ao usuário** (AskUserQuestion, com o remote mostrado na mensagem como
-   contexto) qual é o repositório no GitHub no formato `DONO/REPO` e grave com `status-projeto github DONO/REPO`.
+   contexto; só ele sabe, então sem recomendada) qual é o repositório no GitHub no formato `DONO/REPO` e grave com `status-projeto github DONO/REPO`.
    **Nunca** escreva `<dono>` nem invente o dono. O `guia` e o `atualizar` também param com código 4 / aviso se faltar.
 1. `status-projeto guia --gravar --marcar` (regrava o guia com a lista de (?) atual; sem `--gravar` só mostra) grava `docs/COMO_USAR_STATUS.md` e imprime o bloco **"⚠️ ATENÇÃO — LEIA ANTES DE
    COMEÇAR"**. Mostre esse bloco **inteiro** ao usuário, sem resumir (ele já traz como funciona, frases, comandos,

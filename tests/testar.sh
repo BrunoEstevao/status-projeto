@@ -319,6 +319,43 @@ velho; ( cd "$H" && $SP guia --gravar > /dev/null )
 checa "guia --gravar grava o arquivo" "[ -s $H/docs/COMO_USAR_STATUS.md ]"
 checa "guia --marcar sem --gravar é recusado" "! $SP --raiz $H guia --marcar 2>/dev/null"
 
+echo "== 10. STATUS.md com fases fora do padrão: Ajustar ao formato"
+J="$BASE/ajustar"; rm -rf "$J"; mkdir -p "$J"; git -C "$J" init -q -b main
+( cd "$J" && $SP init --usuario T --valor 150 > /dev/null )
+cat > "$J/STATUS.md" <<'EOF'
+# STATUS — ajustar
+Atualizado: 20/11/2026
+
+## 🔨 Em execução
+- [M] FATIA_A — a (desde 01/11)
+  - Parei em: x
+  - Próximo passo: y
+  - Pendente: z
+
+## 📦 Fatia pronta, não iniciada
+- [P] FATIA_B — b (desde 02/11)
+
+## Feito
+- [P] FATIA_C — c (desde 03/10)
+
+## ✅ Concluído
+- [P] FATIA_D — d (desde 01/10)
+
+## Notas
+texto livre
+EOF
+EXTRAS="$($SP --raiz $J estado | python3 -c "import json,sys;print(' '.join(f\"{x['titulo']}={x['sugestao']}\" for x in json.load(sys.stdin)['status_md']['fases_extras']))")"
+checa "estado aponta as fases fora do padrão com a fase sugerida ($EXTRAS)" "[ \"$EXTRAS\" = '🔨 Em execução=🌐 Feito=✅' ]"
+checa "seção fora do padrão: hook não enxerga a fatia antes do ajuste" "python3 -c \"import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;f,_=c.ler_status_arquivo('$J');sys.exit(len(f['🌐']))\""
+$SP --raiz "$J" status-md --ajustar "🔨 Em execução=🌐" --ajustar "Feito=✅" --marcar > /dev/null
+checa "ajustado: 5 fases na ordem, Notas mantida" "[ \"\$(grep '^## ' $J/STATUS.md | tr '\n' '|')\" = '## 🌐 Codando|## 📦 Fatia pronta, não iniciada|## 🧪 Aguardando teste|## ⏸️ Bloqueado (externo)|## ✅ Concluído|## Notas|' ]"
+checa "nenhum item perdido, subitens mantidos" "for x in FATIA_A FATIA_B FATIA_C FATIA_D 'Parei em: x' 'texto livre'; do grep -q \"\$x\" $J/STATUS.md || exit 1; done"
+checa "fatia em 🌐 depois do ajuste e itens de Feito juntos em ✅" "python3 -c \"import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;f,_=c.ler_status_arquivo('$J');assert [i['nome'] for i in f['🌐']]==['FATIA_A'] and [i['nome'] for i in f['✅']]==['FATIA_C','FATIA_D']\""
+A1="$(sha256sum < $J/STATUS.md)"; $SP --raiz "$J" status-md --marcar > /dev/null
+checa "ajustar não sobra nada fora do padrão; rodar de novo não muda" "[ \"\$(sha256sum < $J/STATUS.md)\" = \"$A1\" ] && $SP --raiz $J estado | grep -q '\"fases_extras\": \[\]'"
+checa "título inexistente é recusado" "! $SP --raiz $J status-md --ajustar 'Nada=🌐' 2>/dev/null"
+checa "guia e README sem '/plugin update' como comando de atualizar" "! grep -q '^/plugin update' $PLUGIN/README.md $V/docs/COMO_USAR_STATUS.md && grep -q 'claude plugin update status-projeto@status-projeto' $V/docs/COMO_USAR_STATUS.md"
+
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"
 exit $FALHAS
