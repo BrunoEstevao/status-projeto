@@ -309,6 +309,77 @@ def ajustar_status(texto, mapa):
     return "\n".join(linhas).rstrip("\n") + "\n"
 
 
+ARQ_CONCLUIDOS = os.path.join("docs", "CONCLUIDOS.md")
+
+
+def cortar_concluidos(texto, dias, ver, hoje=None):
+    """Mantém no ✅ só os itens dos últimos `dias` (pela data do '(desde DD/MM)'); sem data, o item fica.
+    Fecha o ✅ com '- Versões anteriores: ver <ver>'. Devolve (texto_novo, itens_tirados[lista de blocos de linhas])."""
+    hoje = (hoje or c.agora()).replace(hour=0, minute=0, second=0, microsecond=0)
+    limite = hoje - timedelta(days=dias)
+    secoes = secoes_status(texto)
+    tirados, achou = [], False
+    for i, (tit, linhas) in enumerate(secoes):
+        if not tit or not c.RE_FASE.match(tit) or c.emoji_fase(c.RE_FASE.match(tit).group(1)) != "✅":
+            continue
+        achou = True
+        blocos, solto = [], []  # blocos de item (linha + subitens) e o texto que não é item
+        for l in linhas:
+            if l.startswith("- "):
+                blocos.append([l])
+            elif blocos and l[:1] in (" ", "\t") and l.strip():
+                blocos[-1].append(l)
+            else:
+                solto.append((len(blocos), l))
+        fica = []
+        for b in blocos:
+            if c.RE_VERSOES_ANT.match(b[0]):
+                continue  # a linha antiga sai; a nova vai no fim
+            ds = c.RE_DESDE.findall(" ".join(b))
+            dt = c.data_do_desde(ds[-1]) if ds and ds[-1] != "?" else None
+            (tirados if dt and dt < limite else fica).append(b)
+        cab = [l for n, l in solto if n == 0 and l.strip()]  # texto antes do 1º item (ex.: descrição da fase)
+        corpo = cab + [l for b in fica for l in b]
+        corpo = [l for l in corpo if l.strip() != "(nada agora)"] or []
+        corpo.append(f"- Versões anteriores: ver {ver}")
+        secoes[i] = (tit, corpo + [""])
+    if not achou:
+        return texto, []
+    out = []
+    for tit, linhas in secoes:
+        if tit:
+            out.append(tit)
+        out += linhas
+    return "\n".join(out).rstrip("\n") + "\n", tirados
+
+
+def ver_atual(texto):
+    """Para onde a linha 'Versões anteriores: ver X' do ✅ já aponta (ex.: 'VERSOES.json e PROGRESSO.md'), ou ''."""
+    for l in texto.splitlines():
+        if c.RE_VERSOES_ANT.match(l):
+            m = re.search(r"\bver\s+(.+?)\s*(?:\(desde[^)]*\))?\s*\.?$", l, re.I)
+            return m.group(1).strip("` ") if m else ""
+    return ""
+
+
+def concluidos_antigos(raiz, dias):
+    texto = ler(os.path.join(raiz, "STATUS.md"))
+    return len(cortar_concluidos(texto, dias, "x")[1]) if texto else 0
+
+
+def guardar_concluidos(raiz, arquivo, tirados, dias):
+    p = os.path.join(raiz, arquivo)
+    os.makedirs(os.path.dirname(p) or raiz, exist_ok=True)
+    novo = not os.path.exists(p)
+    with open(p, "a", encoding="utf-8", newline="\n") as f:
+        if novo:
+            f.write(f"# Concluídos anteriores — {os.path.basename(raiz)}\n\n"
+                    "Itens tirados do ✅ do STATUS.md pelo corte (status-projeto status-md --cortar-concluidos).\n")
+        f.write(f"\n## Corte de {c.agora():%d/%m/%Y} (concluídos há mais de {dias} dias)\n")
+        for b in tirados:
+            f.write("\n".join(b) + "\n")
+
+
 def fases_faltando(raiz):
     fases, presentes = c.ler_status_arquivo(raiz)
     if fases is None:
@@ -361,7 +432,8 @@ def cmd_estado(a):
         "projeto_novo": projeto_e_novo(raiz),
         "status_md": {"existe": os.path.exists(os.path.join(raiz, "STATUS.md")),
                       "fases_faltando": fases_faltando(raiz),
-                      "fases_extras": fases_extras(raiz) if os.path.exists(os.path.join(raiz, "STATUS.md")) else []},
+                      "fases_extras": fases_extras(raiz) if os.path.exists(os.path.join(raiz, "STATUS.md")) else [],
+                      "concluidos_mais_de_7_dias": concluidos_antigos(raiz, 7)},
         "claude_md": {"existe": bool(claude_md), "tem_bloco": MARCA_INI in claude_md,
                       "regras_antigas_fora_do_bloco": conflitos_claude_md(claude_md)},
         "sessoes_csv": os.path.exists(os.path.join(raiz, c.CSV_SESSOES)),
@@ -468,6 +540,24 @@ def cmd_status_md(a):
         falta = []
     if falta:
         sair("STATUS.md sem as fases: " + " ".join(falta) + " (use --completar-fases para acrescentar só as que faltam)", 3)
+    if a.cortar_concluidos:
+        dias = a.dias if a.dias is not None else (cfg.get("corte_concluidos_dias") or 7)
+        ver = (a.ver or cfg.get("arquivo_concluidos") or ver_atual(ler(p)) or ARQ_CONCLUIDOS).strip()
+        if dias < 1:
+            sair("--dias precisa ser 1 ou mais.")
+        antes = ler(p)
+        novo, tirados = cortar_concluidos(antes, dias, f"`{ver}`" if " " not in ver else ver)
+        guarda = ver.lower().endswith(".md") and " " not in ver
+        if tirados and guarda:
+            guardar_concluidos(raiz, ver, tirados, dias)
+        if novo != antes:
+            escrever(p, novo)
+        cfg["corte_concluidos_dias"], cfg["arquivo_concluidos"] = dias, ver
+        c.gravar_config(raiz, cfg)
+        print(f"✅: {len(tirados)} item(ns) com mais de {dias} dias tirado(s)"
+              + (f" e guardado(s) em {ver}" if tirados and guarda else
+                 (f"; não copiados para {ver} (não é .md): continuam no histórico do git" if tirados else ""))
+              + f". O ✅ termina com 'Versões anteriores: ver {ver}'.")
     fases, _ = c.ler_status_arquivo(raiz)
     problemas = validar_status(fases)
     for pr in problemas:
@@ -1648,6 +1738,10 @@ def main():
     x = s.add_parser("status-md", help="cria (vazio) ou confere o STATUS.md")
     x.add_argument("--vazio", action="store_true", help="cria o STATUS.md com as 5 fases se não existir")
     x.add_argument("--completar-fases", action="store_true", help="acrescenta só as fases que faltam")
+    x.add_argument("--cortar-concluidos", action="store_true",
+                   help="mantém no ✅ só os últimos N dias e fecha com 'Versões anteriores: ver <arquivo>'")
+    x.add_argument("--dias", type=int, default=None, help="com --cortar-concluidos: quantos dias (padrão 7)")
+    x.add_argument("--ver", default="", help=f"para onde a linha aponta (padrão {ARQ_CONCLUIDOS}; .md recebe os itens tirados)")
     x.add_argument("--ajustar", action="append", metavar="TITULO=FASE",
                    help="troca uma seção fora do padrão pela fase padrão, juntando os itens (pode repetir)")
     x.add_argument("--marcar", action="store_true", help="marca a etapa status_md como feita")

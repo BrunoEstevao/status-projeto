@@ -139,6 +139,8 @@ def config_padrao():
         "horas_dia": 8,
         "autonomo_processos": [],
         "contradicoes_ignoradas": [],
+        "corte_concluidos_dias": 0,      # 0 = não corta o ✅; N = mantém só os últimos N dias
+        "arquivo_concluidos": "",        # para onde aponta a linha "Versões anteriores: ver ..."
         "etapas": {},
     }
 
@@ -356,6 +358,8 @@ def ler_estimativa(caminho):
 RE_FASE = re.compile(r"^##\s*(🌐|📦|🧪|⏸️|⏸|✅)")
 RE_DESDE = re.compile(r"\(desde\s+(\d{1,2}/\d{1,2}(?:/\d{2,4})?|\?)\s*\)")
 RE_TAM = re.compile(r"^\[(P|M|G)\]\s*")
+# linha que fecha o ✅ depois do corte ("- Versões anteriores: ver docs/CONCLUIDOS.md"): não é item, não pede data
+RE_VERSOES_ANT = re.compile(r"^(?:-\s+)?\**vers[õo]es\s+anteriores\**\s*:", re.I)
 
 
 def emoji_fase(e):
@@ -377,6 +381,9 @@ def ler_status(texto):
             atual, item = None, None
             continue
         if atual is None:
+            continue
+        if linha.startswith("- ") and RE_VERSOES_ANT.match(linha):
+            item = None
             continue
         if linha.startswith("- "):
             t = linha[2:].strip()

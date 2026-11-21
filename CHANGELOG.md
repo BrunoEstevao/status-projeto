@@ -5,6 +5,19 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.7.0] — 2026-11-21
+### Adicionado
+- Corte do ✅: `status-projeto status-md --cortar-concluidos [--dias N] [--ver ARQUIVO]` mantém no ✅ só os itens dos
+  últimos N dias (padrão 7, pela data do `(desde)`) e fecha a fase com `- Versões anteriores: ver <arquivo>`. Os itens
+  tirados vão para `docs/CONCLUIDOS.md` (ou o `.md` indicado), com os subitens. Itens sem data ficam. Se o ✅ já
+  tiver a linha apontando para outro lugar, a referência é mantida. Rodar de novo não muda nada. A escolha fica no
+  config (`corte_concluidos_dias`, `arquivo_concluidos`).
+- `/instalar-status` (passo 3c): oferece o corte quando há concluídos com mais de 7 dias
+  (`status_md.concluidos_mais_de_7_dias` no `estado`).
+### Corrigido
+- A linha "Versões anteriores: ver ..." não é mais lida como item: não gera aviso de data faltando e não entra em
+  histórico nem cronograma.
+
 ## [1.6.1] — 2026-11-21
 ### Corrigido
 - Custo da estimativa: o relatório multiplicava as horas arredondadas (2 casas) pelo valor. Agora usa a coluna

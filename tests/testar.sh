@@ -425,6 +425,24 @@ evento "$L" "ffffffff-0000-0000-0000-000000000009" SessionEnd > /dev/null
 checa "hooks regravam o sessoes.csv com LF (sem CRLF)" "! grep -q \$'\\r' $L/docs/tempo/sessoes.csv && grep -q ',velha,fechada' $L/docs/tempo/sessoes.csv"
 checa "estimativa e sessões do repo com histórico sem CRLF" "! grep -q \$'\\r' $H/docs/tempo/estimativa_git.csv $H/docs/tempo/sessoes.csv"
 
+echo "== 14. Corte do ✅: só os últimos N dias e 'Versões anteriores: ver ...'"
+Q="$BASE/corte"; rm -rf "$Q"; mkdir -p "$Q"; git -C "$Q" init -q -b main; ( cd "$Q" && $SP init --usuario T > /dev/null )
+HOJE=$(date +%d/%m); ANTIGA=$(date -d '-20 days' +%d/%m)
+printf '## 🌐 Codando\n(nada agora)\n\n## 📦 Fatia pronta, não iniciada\n(nada agora)\n\n## 🧪 Aguardando teste\n(nada agora)\n\n## ⏸️ Bloqueado (externo)\n(nada agora)\n\n## ✅ Concluído\n- [P] NOVA — hoje (desde %s)\n- [M] VELHA — antiga (desde %s)\n  - detalhe da velha\n- [P] SEMDATA — sem data (desde ?)\n' "$HOJE" "$ANTIGA" > "$Q/STATUS.md"
+checa "estado conta 1 concluído com mais de 7 dias" "$SP --raiz $Q estado | grep -q '\"concluidos_mais_de_7_dias\": 1'"
+SAI="$($SP --raiz $Q status-md --cortar-concluidos 2>&1)"
+checa "tira o antigo, mantém o novo e o sem data" "grep -q NOVA $Q/STATUS.md && grep -q SEMDATA $Q/STATUS.md && ! grep -q VELHA $Q/STATUS.md"
+checa "itens tirados guardados em docs/CONCLUIDOS.md (com subitens)" "grep -q VELHA $Q/docs/CONCLUIDOS.md && grep -q 'detalhe da velha' $Q/docs/CONCLUIDOS.md"
+checa "✅ fecha com 'Versões anteriores: ver docs/CONCLUIDOS.md'" "tail -2 $Q/STATUS.md | grep -q '^- Versões anteriores: ver \`docs/CONCLUIDOS.md\`'"
+checa "a linha 'Versões anteriores' não gera aviso de data" "! grep -q 'Versões' <<<\"\$(grep aviso <<<\"\$SAI\")\" && ! $SP --raiz $Q status-md 2>&1 | grep aviso | grep -q 'Vers'"
+A1="$(sha256sum < $Q/STATUS.md)"; $SP --raiz "$Q" status-md --cortar-concluidos > /dev/null
+checa "cortar de novo não muda nada nem duplica" "[ \"\$(sha256sum < $Q/STATUS.md)\" = \"$A1\" ] && [ \$(grep -c VELHA $Q/docs/CONCLUIDOS.md) = 1 ]"
+printf '## 🌐 Codando\n## 📦 Fatia pronta, não iniciada\n## 🧪 Aguardando teste\n## ⏸️ Bloqueado (externo)\n## ✅ Concluído\n- [M] VELHA2 — antiga (desde %s)\n- Versões anteriores: ver VERSOES.json e PROGRESSO.md (desde 13/11)\n' "$ANTIGA" > "$Q/STATUS.md"
+python3 -c "import json;p='$Q/.claude-status/config.json';d=json.load(open(p));d['arquivo_concluidos']='';json.dump(d,open(p,'w'))"
+$SP --raiz "$Q" status-md --cortar-concluidos > /dev/null
+checa "linha existente: mantém a referência (VERSOES.json e PROGRESSO.md), sem o (desde)" "tail -1 $Q/STATUS.md | grep -qx -- '- Versões anteriores: ver VERSOES.json e PROGRESSO.md' && ! grep -q VELHA2 $Q/STATUS.md"
+checa "--dias 30 mantém um item de 20 dias" "printf '## 🌐 Codando\n## 📦 Fatia pronta, não iniciada\n## 🧪 Aguardando teste\n## ⏸️ Bloqueado (externo)\n## ✅ Concluído\n- [M] VINTE — x (desde %s)\n' $ANTIGA > $Q/STATUS.md && $SP --raiz $Q status-md --cortar-concluidos --dias 30 > /dev/null && grep -q VINTE $Q/STATUS.md"
+
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"
 exit $FALHAS

@@ -48,7 +48,7 @@ Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `
   - Atualizar: `status-projeto atualizar` (migra o config, regrava só o bloco do CLAUDE.md e o guia), depois
     `status-projeto reparar` e trate o que aparecer. Mostre o que mudou do CHANGELOG do plugin
     (`${CLAUDE_PLUGIN_ROOT}/CHANGELOG.md`) entre `versao_plugin_instalada` e `versao_plugin`.
-    Rode também os passos 3a (fatias fora da pasta) e 3b (contradições nas fatias em 📦).
+    Rode também os passos 3a (fatias fora da pasta), 3b (contradições nas fatias em 📦) e 3c (corte do ✅).
 - `instalado: true` mas incompleto → diga "a instalação anterior parou; continuo de onde parou" e faça **só as etapas
   de `etapas_pendentes`**, na ordem abaixo. Não pergunte de novo o que já está no config.
 - `instalado: false` → instalação nova, a partir do passo 2.
@@ -155,6 +155,16 @@ e **status fora do STATUS.md** (TODO.md, PROGRESSO.md...).
   rodadas, enquanto o texto da linha não mudar). `--ignoradas` lista; `--desfazer ID` faz voltar a valer.
   Só com o sim, edite **apenas aquelas linhas** de cada fatia para seguir a regra (sem reescrever o resto),
   mostre o `git diff` das fatias e rode `status-projeto contradicoes` de novo para confirmar. Não faça commit.
+
+## Passo 3c — corte do ✅ (projeto existente, depois do STATUS.md)
+Se `status_md.concluidos_mais_de_7_dias` for maior que 0, pergunte (AskUserQuestion):
+**Manter só os últimos 7 dias no ✅ (Recomendado)** — motivo: "o ✅ tem N itens mais antigos; o STATUS.md fica curto e
+eles vão para `docs/CONCLUIDOS.md`, sem perder nada" · **Outro número de dias** · **Manter tudo**.
+Sim → `status-projeto status-md --cortar-concluidos [--dias N] [--ver ARQUIVO] --marcar`. O ✅ fecha com
+`- Versões anteriores: ver <arquivo>` (essa linha não é item e não pede data). Se o ✅ já tiver essa linha apontando
+para outro lugar (ex.: `VERSOES.json e PROGRESSO.md`), o corte mantém a referência. Os itens tirados só são copiados
+quando o destino é um `.md`; senão, avise que eles ficam só no histórico do git e no arquivo citado. Itens com
+`(desde ?)` ficam. Mostre o `git diff STATUS.md`.
 
 ## Passo 4 — etapa `estimativa`
 **Se `dados_existentes.estimativa_git` existir**, o projeto já tem a estimativa: mostre sessões, horas e custo dela e
