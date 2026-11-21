@@ -58,7 +58,9 @@ claude plugin install status-projeto@status-projeto
 ```
 
 Ele pergunta três coisas: seu nome, o valor da hora (padrão R$ 150) e a pasta das fatias (ele mostra a pasta que já
-existir). Depois disso:
+existir). Se o projeto já tiver `docs/tempo/taxa.csv` e `docs/tempo/estimativa_git.csv`, ele aproveita os dois sem
+sobrescrever nem recalcular. Se o valor informado for diferente do atual do taxa.csv, ele pergunta a partir de quando
+o novo vale e acrescenta uma linha no fim, sem mexer nas antigas. Depois disso:
 
 - **projeto novo:** cria o `STATUS.md` vazio com as 5 fases;
 - **projeto que já existe:** lista antes o status que estiver espalhado em outros arquivos (TODO, PROGRESSO,
@@ -117,6 +119,7 @@ Se outro plugin usar o mesmo nome, use o nome completo: `/status-projeto:status-
 | `.claude-status/config.json` | versão, data da instalação, seu nome, valor da hora com histórico, pasta das fatias, repos irmãos, etapas concluídas | sim |
 | `docs/tempo/sessoes.csv` | tempo medido: `inicio,fim,repo,fatia,tipo,sessao,estado` | sim (com `merge=union`) |
 | `docs/tempo/estimativa_git.csv` | horas estimadas pelo git antes da instalação | sim |
+| `docs/tempo/taxa.csv` | só se o projeto já tiver: histórico do valor da hora (`vigente_desde,valor_hora,observacao`), que passa a ser a fonte do valor; o plugin só acrescenta linhas no fim | sim |
 | `docs/COMO_USAR_STATUS.md` | o guia "ATENÇÃO — LEIA ANTES DE COMEÇAR" | sim |
 | `.gitattributes`, `.gitignore` | `merge=union` no CSV; trava e estado local fora do git | sim |
 | `.claude/settings.json` | registra o plugin no projeto (quem abrir o repo recebe o convite para instalar) | sim |

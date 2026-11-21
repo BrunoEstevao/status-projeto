@@ -379,6 +379,28 @@ checa "fatias-soltas: raiz fora do git, citada no STATUS, docs/ em grupo, fatias
 checa "estado traz fatias_fora_da_pasta" "$SP --raiz $K estado | grep -q 'FATIA_V3_API_2_CARTAO'"
 checa "CLAUDE.md não conta como status espalhado por causa do bloco do plugin" "! $SP --raiz $V espalhado | grep -q '^- CLAUDE.md'"
 
+echo "== 12. Projeto que já tem taxa.csv e estimativa_git.csv: aproveita sem mexer"
+Z="$BASE/dados"; rm -rf "$Z"; mkdir -p "$Z/docs/tempo"; git -C "$Z" init -q -b main
+( cd "$Z" && git commit -q --allow-empty -m "início" )
+printf 'vigente_desde,valor_hora,observacao\n2026-10-01,150.00,valor inicial\n' > "$Z/docs/tempo/taxa.csv"
+printf 'data,inicio,fim,horas,fatia,tipo,commits,repo,valor_hora,custo\n2026-10-24,2026-10-24 20:17,2026-10-25 02:46,6.47,f06,interativo,37,dados,150.00,971.21\n' > "$Z/docs/tempo/estimativa_git.csv"
+H_TX="$(sha256sum < $Z/docs/tempo/taxa.csv)"; H_EST="$(sha256sum < $Z/docs/tempo/estimativa_git.csv)"
+checa "estado mostra taxa.csv (R\$ 150) e a estimativa existente" "$SP --raiz $Z estado | python3 -c \"import json,sys;d=json.load(sys.stdin)['dados_existentes'];assert d['taxa_csv']['valor_atual']==150 and d['estimativa_git']['sessoes']==1\""
+( cd "$Z" && $SP init --usuario T --valor 100 > /dev/null 2>&1 ); rc=$?
+checa "valor diferente sem --valor-desde: recusa (código 3) e não cria config" "[ $rc = 3 ] && [ ! -e $Z/.claude-status/config.json ] && [ \"\$(sha256sum < $Z/docs/tempo/taxa.csv)\" = \"$H_TX\" ]"
+checa "--valor-desde antes da última linha é recusado" "! ( cd $Z && $SP init --usuario T --valor 100 --valor-desde 2026-09-01 ) 2>/dev/null"
+( cd "$Z" && $SP init --usuario T --valor 100 --valor-desde 2026-11-21 > /dev/null )
+checa "linha nova no fim do taxa.csv, antigas intactas" "[ \"\$(head -2 $Z/docs/tempo/taxa.csv | sha256sum)\" = \"$H_TX\" ] && tail -1 $Z/docs/tempo/taxa.csv | grep -q '^2026-11-21,100.00,'"
+checa "config usa o histórico do taxa.csv" "python3 -c \"import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;v=[x['valor'] for x in c.ler_config('$Z')['valor_hora']];assert v==[150.0,100.0],v\""
+( cd "$Z" && $SP estimar > /dev/null && $SP status-md --vazio --marcar > /dev/null )
+checa "estimativa existente não foi recalculada nem mexida" "[ \"\$(sha256sum < $Z/docs/tempo/estimativa_git.csv)\" = \"$H_EST\" ]"
+$SP --raiz "$Z" valor 120 --obs teste > /dev/null
+checa "/status-valor acrescenta no taxa.csv sem tocar nas antigas" "[ \$(wc -l < $Z/docs/tempo/taxa.csv) = 4 ] && [ \"\$(head -2 $Z/docs/tempo/taxa.csv | sha256sum)\" = \"$H_TX\" ]"
+Y="$BASE/dados2"; rm -rf "$Y"; mkdir -p "$Y/docs/tempo"; git -C "$Y" init -q -b main
+printf 'vigente_desde,valor_hora,observacao\n2026-10-01,150.00,x\n' > "$Y/docs/tempo/taxa.csv"; HY="$(sha256sum < $Y/docs/tempo/taxa.csv)"
+( cd "$Y" && $SP init --usuario T > /dev/null )
+checa "init sem --valor aproveita o taxa.csv sem mexer" "[ \"\$(sha256sum < $Y/docs/tempo/taxa.csv)\" = \"$HY\" ] && grep -q '\"valor\": 150.0' $Y/.claude-status/config.json"
+
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"
 exit $FALHAS

@@ -14,7 +14,8 @@ Argumentos recebidos: `$ARGUMENTS` (podem trazer `usuario=`, `valor=`, `pasta=`;
 
 ## Regras que nunca quebram
 - **Nunca** reinstale por cima: se já houver instalação, siga o passo 1.
-- **Nunca** sobrescreva `STATUS.md` nem `docs/tempo/sessoes.csv`. **Nunca** refaça a estimativa do git
+- **Nunca** sobrescreva `STATUS.md`, `docs/tempo/sessoes.csv`, `docs/tempo/estimativa_git.csv` nem
+  `docs/tempo/taxa.csv` (no taxa.csv só se acrescenta linha no fim, pelo programa). **Nunca** refaça a estimativa do git
   (`status-projeto estimar` já se recusa). **Nunca** duplique as regras no `CLAUDE.md` (o bloco fica entre marcas).
 - **Nunca** faça commit nem push sem o usuário escrever **"pode commitar"**.
 - Não leia nem copie segredos (`.env`, chaves). O que não der para comprovar pelo código/git: `(?)`.
@@ -56,9 +57,16 @@ Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `
 Uma AskUserQuestion com até 3 perguntas (pule as que vieram nos argumentos):
 1. **Nome do usuário** (como as regras vão chamar a pessoa que testa e decide). Só o usuário sabe: sem recomendada.
    Primeira opção: o `git config user.name` (descrição: "o nome dos seus commits"); "Other" para outro nome.
-2. **Valor da hora** (R$). Só o usuário sabe: sem recomendada; diga na pergunta que depende do valor que ele cobra
-   ou quer usar como referência, e que vale só daqui para frente (muda com /status-valor). Opções:
-   **150 (padrão do plugin)**, 100, 200.
+2. **Valor da hora** (R$).
+   - **Se `dados_existentes.taxa_csv` existir**, o projeto já tem o valor em `docs/tempo/taxa.csv`: mostre o
+     histórico e pergunte **Manter R$ <valor_atual> (Recomendado)** — motivo: "é o valor que já está no taxa.csv
+     desde <desde>" · **Outro valor**. Manter → `init` **sem** `--valor` (aproveita o arquivo e não mexe nele).
+     Outro valor → pergunte **a partir de quando vale** (só o usuário sabe: sem recomendada; opções: hoje, a data
+     da instalação, outra data) e rode `init --valor <novo> --valor-desde AAAA-MM-DD`: acrescenta uma linha no fim
+     do taxa.csv e não toca nas antigas. Nunca edite o taxa.csv à mão.
+   - Sem taxa.csv: só o usuário sabe, sem recomendada; diga na pergunta que depende do valor que ele cobra ou quer
+     usar como referência, e que vale só daqui para frente (muda com /status-valor). Opções:
+     **150 (padrão do plugin)**, 100, 200.
 3. **Pasta das fatias** — se `pastas_fatias_detectadas` não estiver vazia: **`<primeira detectada>` (Recomendado)** —
    motivo: "já tem N arquivos de fatia". Senão: **`fatias` (Recomendado)** — motivo: "é o nome que as regras e as
    instruções do claude.ai usam por padrão". A pasta das concluídas é `<pasta>_executadas` (ou a existente, ex.:
@@ -149,7 +157,10 @@ e **status fora do STATUS.md** (TODO.md, PROGRESSO.md...).
   mostre o `git diff` das fatias e rode `status-projeto contradicoes` de novo para confirmar. Não faça commit.
 
 ## Passo 4 — etapa `estimativa`
-`status-projeto estimar`. Grava `docs/tempo/estimativa_git.csv` uma vez só ("estimado antes da instalação": sessões
+**Se `dados_existentes.estimativa_git` existir**, o projeto já tem a estimativa: mostre sessões, horas e custo dela e
+diga que fica como está. **Não recalcule, não edite, não "corrija" valor nem colunas** (mesmo que as colunas sejam
+outras ou o valor da hora tenha mudado depois): rode só `status-projeto estimar`, que marca a etapa sem mexer no arquivo.
+Sem estimativa: `status-projeto estimar`. Grava `docs/tempo/estimativa_git.csv` uma vez só ("estimado antes da instalação": sessões
 com mais de 2 h entre commits, +30 min antes do primeiro commit). Se o comando disser que já existe, aceite — não refaça.
 
 ## Passo 5 — etapa `claude_md`

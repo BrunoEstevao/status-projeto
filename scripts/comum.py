@@ -17,6 +17,7 @@ PASTA_LOCAL = os.path.join(PASTA_CFG, "local")  # estado da máquina, fora do gi
 PASTA_TEMPO = os.path.join("docs", "tempo")
 CSV_SESSOES = os.path.join(PASTA_TEMPO, "sessoes.csv")
 CSV_ESTIMATIVA = os.path.join(PASTA_TEMPO, "estimativa_git.csv")
+CSV_TAXA = os.path.join(PASTA_TEMPO, "taxa.csv")  # opcional: quando o projeto já tem, é a fonte do valor da hora
 GUIA = os.path.join("docs", "COMO_USAR_STATUS.md")
 CAMPOS = ["inicio", "fim", "repo", "fatia", "tipo", "sessao", "estado"]
 CAMPOS_EST = ["inicio", "fim", "horas", "fatia", "tipo", "commits", "repo", "valor_hora", "custo"]
@@ -167,7 +168,57 @@ def ler_config(raiz):
     except (FileNotFoundError, ValueError):
         return None
     cfg, _ = migrar(cfg)
+    tx = ler_taxa_csv(raiz)
+    if tx:  # o taxa.csv do projeto manda; o config guarda uma cópia
+        cfg["valor_hora"] = tx
     return cfg
+
+
+def _coluna(campos, *pedacos):
+    for k in campos:
+        if any(p in k.lower() for p in pedacos):
+            return k
+    return None
+
+
+def ler_taxa_csv(raiz):
+    """[{desde, valor, obs}] do docs/tempo/taxa.csv (colunas tipo vigente_desde,valor_hora,observacao), ou None."""
+    try:
+        with open(os.path.join(raiz, CSV_TAXA), newline="", encoding="utf-8") as f:
+            r = csv.DictReader(f)
+            campos = r.fieldnames or []
+            cd, cv, co = _coluna(campos, "desde", "vigente", "data"), _coluna(campos, "valor"), _coluna(campos, "obs")
+            if not cd or not cv:
+                return None
+            out = []
+            for l in r:
+                try:
+                    v = float(str(l.get(cv) or "").replace(",", "."))
+                except ValueError:
+                    continue
+                out.append({"desde": normaliza_desde(l.get(cd)), "valor": v, "obs": (l.get(co) or "") if co else ""})
+            return sorted(out, key=lambda x: x["desde"]) or None
+    except FileNotFoundError:
+        return None
+
+
+def acrescentar_taxa_csv(raiz, desde, valor, obs=""):
+    """Acrescenta uma linha no fim do taxa.csv (as antigas não mudam), no formato de data que o arquivo já usa."""
+    p = os.path.join(raiz, CSV_TAXA)
+    with open(p, newline="", encoding="utf-8") as f:
+        texto = f.read()
+    campos = next(csv.reader([texto.splitlines()[0]]))
+    cd, cv, co = _coluna(campos, "desde", "vigente", "data"), _coluna(campos, "valor"), _coluna(campos, "obs")
+    d = desde.strftime("%Y-%m-%d") if desde.time() == datetime.min.time() else desde.strftime("%Y-%m-%d %H:%M")
+    linha = {cd: d, cv: f"{valor:.2f}"}
+    if co:
+        linha[co] = obs
+    fim = "\r\n" if texto.endswith("\r\n") else "\n"
+    with open(p, "a", newline="", encoding="utf-8") as f:
+        if texto and not texto.endswith(("\n", "\r")):
+            f.write(fim)
+        w = csv.DictWriter(f, fieldnames=campos, extrasaction="ignore", lineterminator=fim)
+        w.writerow(linha)
 
 
 def gravar_config(raiz, cfg):

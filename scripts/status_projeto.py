@@ -316,6 +316,22 @@ def fases_faltando(raiz):
     return [e for e, _ in c.FASES if e not in presentes]
 
 
+def dados_existentes(raiz):
+    """taxa.csv e estimativa_git.csv que o projeto já tem: o instalador aproveita, sem sobrescrever nem recalcular."""
+    tx = c.ler_taxa_csv(raiz)
+    est = c.ler_estimativa(os.path.join(raiz, c.CSV_ESTIMATIVA))
+    out = {"taxa_csv": None, "estimativa_git": None}
+    if tx:
+        out["taxa_csv"] = {"arquivo": c.CSV_TAXA, "linhas": len(tx), "valor_atual": tx[-1]["valor"],
+                           "desde": tx[-1]["desde"], "historico": [[t["desde"], t["valor"]] for t in tx]}
+    if est is not None:
+        h = sum(float(r.get("horas") or 0) for r in est)
+        cu = sum(float(r.get("custo") or 0) for r in est)
+        out["estimativa_git"] = {"arquivo": c.CSV_ESTIMATIVA, "sessoes": len(est), "horas": round(h, 2),
+                                 "custo": round(cu, 2), "colunas": list(est[0].keys()) if est else []}
+    return out
+
+
 def cmd_estado(a):
     raiz = a.raiz
     cfg = c.ler_config(raiz)
@@ -352,6 +368,7 @@ def cmd_estado(a):
         "estimativa_git": os.path.exists(os.path.join(raiz, c.CSV_ESTIMATIVA)),
         "pastas_fatias_detectadas": pastas,
         "fatias_soltas_na_raiz": na_raiz,
+        "dados_existentes": dados_existentes(raiz),
         "fatias_fora_da_pasta": fatias_fora_da_pasta(raiz, cfg),
         "hooks_manuais_antigos": hooks_manuais(raiz),
     }
@@ -367,10 +384,36 @@ def cmd_init(a):
     if not a.usuario:
         sair("Falta --usuario.")
     cfg = c.config_padrao()
+    tx = c.ler_taxa_csv(raiz)
+    if tx:  # projeto já tem taxa.csv: aproveita, não sobrescreve
+        atual = tx[-1]
+        if a.valor is not None and abs(float(a.valor) - atual["valor"]) > 0.005:
+            if not a.valor_desde:
+                sair(f"{c.CSV_TAXA} já existe: valor atual {c.dinheiro(atual['valor'])} desde "
+                     f"{c.data_br(atual['desde'])}. O valor informado ({c.dinheiro(float(a.valor))}) é diferente: "
+                     "pergunte a partir de quando ele vale e rode de novo com --valor-desde AAAA-MM-DD "
+                     "(acrescenta uma linha no taxa.csv; as antigas não mudam). Para manter o atual, rode sem --valor.", 3)
+            d = c.para_dt(a.valor_desde) or (c.data_do_desde(a.valor_desde) if "/" in a.valor_desde else None)
+            if not d:
+                sair("Data inválida em --valor-desde (use AAAA-MM-DD ou DD/MM/AAAA).")
+            if d.strftime(c.FMT) <= atual["desde"]:
+                sair(f"--valor-desde precisa ser depois de {c.data_br(atual['desde'])} (a última linha do taxa.csv); "
+                     "as linhas antigas não são mudadas.")
+            c.acrescentar_taxa_csv(raiz, d, float(a.valor), "valor informado na instalação do status-projeto")
+            print(f"{c.CSV_TAXA}: linha nova {c.dinheiro(float(a.valor))} a partir de {c.data_br(d.strftime(c.FMT))} "
+                  "(as linhas antigas não mudaram).")
+            tx = c.ler_taxa_csv(raiz)
+        else:
+            print(f"Valor da hora aproveitado de {c.CSV_TAXA} ({len(tx)} linha(s); atual {c.dinheiro(atual['valor'])}); "
+                  "o arquivo não foi mexido.")
+        valor_hora = tx
+    else:
+        valor_hora = [{"desde": c.INICIO_DOS_TEMPOS, "valor": float(150.0 if a.valor is None else a.valor),
+                       "obs": "valor inicial"}]
     cfg.update({
         "instalado_em": c.agora_s(),
         "usuario": a.usuario.strip(),
-        "valor_hora": [{"desde": c.INICIO_DOS_TEMPOS, "valor": float(a.valor), "obs": "valor inicial"}],
+        "valor_hora": valor_hora,
         "pasta_fatias": a.pasta_fatias.strip("/"),
         "pasta_fatias_executadas": (a.pasta_executadas or a.pasta_fatias.strip("/") + "_executadas").strip("/"),
         "projeto_novo": projeto_e_novo(raiz),
@@ -1307,6 +1350,9 @@ def cmd_valor(a):
         desde = max(d, desde) if d.date() == desde.date() else d
     atual = c.taxa_em(cfg, desde)
     cfg["valor_hora"].append({"desde": desde.strftime(c.FMT), "valor": valor, "obs": a.obs or ""})
+    if c.ler_taxa_csv(raiz):
+        c.acrescentar_taxa_csv(raiz, desde, valor, a.obs or "")
+        print(f"{c.CSV_TAXA}: linha nova no fim (as antigas não mudaram).")
     c.gravar_config(raiz, cfg)
     print(f"Valor da hora: {c.dinheiro(atual, moeda)} → {c.dinheiro(valor, moeda)} a partir de {c.data_br(desde.strftime(c.FMT))}.")
     print("Sessões anteriores continuam com o valor da época (estimativa do git grava o valor de cada sessão).")
@@ -1579,7 +1625,8 @@ def main():
     s.add_parser("estado", help="diagnóstico em JSON para o /instalar-status")
     x = s.add_parser("init", help="cria o config (primeira instalação)")
     x.add_argument("--usuario", required=True)
-    x.add_argument("--valor", type=float, default=150.0)
+    x.add_argument("--valor", type=float, default=None, help="valor da hora (padrão 150; com taxa.csv, o dele)")
+    x.add_argument("--valor-desde", default="", help="com taxa.csv e valor diferente: a partir de quando vale")
     x.add_argument("--pasta-fatias", default="fatias")
     x.add_argument("--pasta-executadas", default="")
     x.add_argument("--autor", action="append", help="só commits deste autor na estimativa (pode repetir)")

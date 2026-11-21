@@ -5,6 +5,18 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.6.0] — 2026-11-21
+### Adicionado
+- Projeto que já tem `docs/tempo/taxa.csv`: o valor da hora vem dele, que passa a ser a fonte; o config guarda uma
+  cópia. O `init` sem `--valor` aproveita o arquivo sem mexer nele. Com um valor diferente do atual, o `init` pede
+  `--valor-desde` (o `/instalar-status` pergunta a partir de quando vale) e acrescenta uma linha no fim, sem tocar
+  nas antigas. O `/status-valor` também acrescenta no taxa.csv.
+- `estado` → `dados_existentes`: taxa.csv (histórico) e estimativa_git.csv (sessões, horas, custo, colunas) que o
+  projeto já tem.
+### Corrigido
+- Instalação em projeto com estimativa e valor já registrados (caso do zapai): o instalador não recalcula nem edita a
+  `estimativa_git.csv`, mesmo com outras colunas, e não troca o valor da hora sem perguntar a partir de quando vale.
+
 ## [1.5.0] — 2026-11-20
 ### Adicionado
 - `status-projeto fatias-soltas` (e `fatias_fora_da_pasta` no `estado`): acha todo `FATIA_*.md` fora da pasta das
