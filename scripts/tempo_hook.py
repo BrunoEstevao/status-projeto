@@ -4,6 +4,9 @@
 Chamado por hooks/hooks.json com o nome do evento:
   SessionStart | UserPromptSubmit | PostToolUse | Stop | SessionEnd
 Só age em repositório que tenha .claude-status/config.json (instalado com /instalar-status).
+Com o plugin instalado em mais de um escopo (user e project), só a instalação que vence (comum.instalacoes_plugin:
+a versão mais nova; no empate, a user) grava; as outras saem em silêncio. Cópia fora do installed_plugins.json
+(--plugin-dir) roda sempre.
 Grava em docs/tempo/sessoes.csv do repositório principal (também quando a sessão roda numa worktree):
 
   inicio,fim,repo,fatia,tipo,sessao,estado
@@ -117,6 +120,11 @@ def main():
     cfg = c.ler_config(raiz)
     if cfg is None:
         return  # repositório sem o status-projeto instalado
+    try:
+        if not c.instalacoes_plugin(raiz)["esta_vence"]:
+            return  # outra instalação do plugin (mais nova, ou a user) grava este evento
+    except Exception:
+        pass  # na dúvida, grava (melhor que perder o tempo)
     sid = dados.get("session_id", "")
     modo = dados.get("permission_mode", "")
     prompt = (dados.get("prompt") or "").strip() if evento == "UserPromptSubmit" else ""

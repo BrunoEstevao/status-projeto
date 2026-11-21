@@ -15,6 +15,11 @@ checa() { if eval "$2"; then ok "$1"; else nok "$1"; fi; }
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME="Pessoa Teste" GIT_AUTHOR_EMAIL=teste@exemplo.invalid \
        GIT_COMMITTER_NAME="Pessoa Teste" GIT_COMMITTER_EMAIL=teste@exemplo.invalid
 unset CLAUDE_CODE_ENTRYPOINT STATUS_PROJETO_TIPO
+# ~/.claude de mentira: o installed_plugins.json e o known_marketplaces.json da máquina não entram no teste
+export CLAUDE_CONFIG_DIR="$BASE/claude_cfg"
+rm -rf "$CLAUDE_CONFIG_DIR"; mkdir -p "$CLAUDE_CONFIG_DIR/plugins"
+printf '{"status-projeto":{"source":{"source":"github","repo":"Dono-Teste/status-projeto"}}}\n' \
+  > "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json"
 
 instalar() {  # simula as etapas mecânicas do /instalar-status
   local d="$1"; shift
@@ -687,6 +692,75 @@ checa ".gitattributes do projeto com os CSVs em LF (autocrlf do Windows não tro
 printf '# status-projeto: x\ndocs/tempo/sessoes.csv merge=union\nIDEIAS.md merge=union\nERROS.md merge=union\n' > "$W/.gitattributes"
 checa "reparar aponta o eol=lf faltando e o gitattributes acrescenta uma vez só" "$SP --raiz $W reparar | grep -q 'eol=lf' && (cd $W && $SP gitattributes >/dev/null && $SP gitattributes >/dev/null) && [ \$(grep -c 'eol=lf' $W/.gitattributes) = 1 ]"
 checa "hooks.json chama o bash, não o python3" "! grep -q python3 $PLUGIN/hooks/hooks.json && [ \$(grep -c 'hooks/tempo.sh' $PLUGIN/hooks/hooks.json) = 5 ]"
+
+echo "== 8. Duas instalações ao mesmo tempo (user + project)"
+CFGD="$CLAUDE_CONFIG_DIR"; IP="$CFGD/plugins/installed_plugins.json"
+OUTRA="$BASE/outra_copia"; mkdir -p "$OUTRA"
+checa "etapa hooks grava só o extraKnownMarketplaces (sem enabledPlugins)" "grep -q 'Dono-Teste/status-projeto' $V/.claude/settings.json && ! grep -q enabledPlugins $V/.claude/settings.json"
+python3 - "$V/.claude/settings.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p)); d["enabledPlugins"] = {"status-projeto@status-projeto": True, "outro@mk": True}
+json.dump(d, open(p, "w"), indent=2)
+PY
+OUT="$($SP --raiz $V verificar 2>&1)"
+checa "verificar aponta o enabledPlugins antigo" "grep -q '❌ sem enabledPlugins' <<<\"\$OUT\""
+OUT="$($SP --raiz $V atualizar 2>&1)"
+checa "atualizar mostra e tira só o enabledPlugins do status-projeto" "grep -q '\"status-projeto@status-projeto\": true' <<<\"\$OUT\" && ! grep -q 'status-projeto@' $V/.claude/settings.json && grep -q 'outro@mk' $V/.claude/settings.json && grep -q extraKnownMarketplaces $V/.claude/settings.json"
+OUT="$($SP --raiz $V atualizar 2>&1)"
+checa "atualizar de novo não mexe no settings.json" "! grep -q 'tirando a entrada' <<<\"\$OUT\""
+inst() {  # inst ESCOPO VERSAO PASTA [PROJETO] ... → installed_plugins.json
+  python3 - "$IP" "$@" <<'PY'
+import json, sys
+arq, args = sys.argv[1], sys.argv[2:]
+lst = []
+for i in range(0, len(args), 4):
+    e, v, p, proj = args[i:i + 4]
+    d = {"scope": e, "installPath": p, "version": v}
+    if proj != "-":
+        d["projectPath"] = proj
+    lst.append(d)
+json.dump({"version": 2, "plugins": {"status-projeto@status-projeto": lst, "outro@mk": [{"scope": "user", "installPath": "/x", "version": "99.0.0"}]}}, open(arq, "w"))
+PY
+}
+grava() {  # grava SID → 0 se o hook desta cópia ($PLUGIN) gravou a sessão
+  evento "$V" "$1" SessionStart > /dev/null; grep -q ",$1," "$V/docs/tempo/sessoes.csv"
+}
+inst user 9.9.9 "$OUTRA" - project 1.12.0 "$PLUGIN" "$V"
+checa "user mais nova vence: o hook da project sai sem gravar (código 0)" "! grava dup1 && (evento $V dup1b Stop; [ \$? = 0 ])"
+inst user 1.12.0 "$OUTRA" - project 1.12.0 "$PLUGIN" "$V"
+checa "mesma versão: vence a user (a project não grava)" "! grava dup2"
+inst user 1.1.0 "$OUTRA" - project 1.12.0 "$PLUGIN" "$V"
+checa "project mais nova vence: grava" "grava dup3"
+inst user 1.12.0 "$PLUGIN" - project 1.1.0 "$OUTRA" "$V"
+checa "esta é a user mais nova: grava" "grava dup4"
+inst user 9.9.9 "$BASE/nao_existe" - project 1.12.0 "$PLUGIN" "$V"
+checa "instalação sem pasta é descartada" "grava dup5"
+inst user 9.9.9 "$OUTRA" - project 1.12.0 "$PLUGIN" "$V"
+printf '{"enabledPlugins":{"status-projeto@status-projeto":false}}\n' > "$CFGD/settings.json"
+checa "instalação desativada (enabledPlugins false) é descartada" "grava dup6"
+rm -f "$CFGD/settings.json"
+inst user 9.9.9 "$OUTRA" - project 1.12.0 "$PLUGIN" "$BASE/outro_projeto"
+checa "project de outro projeto não conta (esta não vale aqui; a user vence)" "! grava dup7"
+inst user 9.9.9 "$OUTRA" -
+checa "esta fora do installed_plugins.json (--plugin-dir): grava" "grava dup8"
+inst user 1.12.0 "$OUTRA" - project 1.1.0 "$OUTRA/../outra_copia" "$V"
+OUT="$($SP --raiz $V instalacoes)"; rc=$?
+checa "instalacoes: código 3, lista as duas e manda desinstalar a project" "[ $rc = 3 ] && grep -q 'user 1.12.0 (vence)' <<<\"\$OUT\" && grep -q 'project 1.1.0' <<<\"\$OUT\" && grep -q 'claude plugin uninstall status-projeto@status-projeto --scope project' <<<\"\$OUT\" && ! grep -q 'plugin update' <<<\"\$OUT\""
+inst user 1.1.0 "$OUTRA" - project 1.12.0 "$PLUGIN" "$V"
+OUT="$($SP --raiz $V instalacoes --json)"
+checa "user mais velha: comandos atualizam a user (--scope user) antes de tirar a project" "python3 -c 'import json,sys;d=json.load(sys.stdin);c=d[\"comandos_corrigir\"];sys.exit(0 if d[\"duplicadas\"] and \"update status-projeto@status-projeto --scope user\" in c[1] and \"--scope project\" in c[2] else 1)' <<<\"\$OUT\""
+OUT="$($SP --raiz $V verificar 2>&1)"
+checa "verificar mostra as instalações e aponta as duas" "grep -q 'Instalações do plugin' <<<\"\$OUT\" && grep -q '❌ uma instalação só' <<<\"\$OUT\""
+checa "estado traz instalacoes_plugin.duplicadas" "$SP --raiz $V estado | python3 -c 'import json,sys;sys.exit(0 if json.load(sys.stdin)[\"instalacoes_plugin\"][\"duplicadas\"] else 1)'"
+inst user 1.12.0 "$OUTRA" -
+checa "uma só: instalacoes com código 0" "$SP --raiz $V instalacoes > /dev/null"
+rm -f "$IP"
+OUT="$(python3 - "$PLUGIN/scripts" <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import comum as c
+print(c.chave_versao("1.11.0") > c.chave_versao("1.9.0"), c.chave_versao("1.1.1-73c8cf") == (1, 1, 1))
+PY
+)"
+checa "versões comparadas como números (1.11.0 > 1.9.0)" "[ \"\$OUT\" = 'True True' ]"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

@@ -48,6 +48,144 @@ def versao_plugin():
         return "0.0.0"
 
 
+def nome_plugin():
+    try:
+        with open(os.path.join(RAIZ_PLUGIN, ".claude-plugin", "plugin.json"), encoding="utf-8") as f:
+            return json.load(f).get("name", "status-projeto")
+    except Exception:
+        return "status-projeto"
+
+
+# ---------------------------------------------------------------- instalações do plugin (installed_plugins.json)
+
+ORDEM_ESCOPO = {"user": 0, "project": 1, "local": 2}  # no empate de versão, vence a user
+
+
+def pasta_config_claude():
+    """$CLAUDE_CONFIG_DIR ou ~/.claude."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    return os.path.expanduser(d) if d else os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def chave_versao(v):
+    """'1.11.0' → (1, 11, 0); '1.1.1-73c8cf' → (1, 1, 1). Comparável; o que não for número vira 0."""
+    return tuple(int(x) if x.isdigit() else 0 for x in re.split(r"[.]", re.split(r"[-+ ]", str(v or "0"))[0]))
+
+
+def mesmo_caminho(a, b):
+    if not a or not b:
+        return False
+    try:
+        return os.path.normcase(os.path.realpath(barra(a))) == os.path.normcase(os.path.realpath(barra(b)))
+    except Exception:
+        return False
+
+
+def _ler_json(p):
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ativado(arq_settings, chave):
+    """False só quando o settings.json daquele escopo diz enabledPlugins[chave] = false."""
+    return _ler_json(arq_settings).get("enabledPlugins", {}).get(chave) is not False
+
+
+def instalacoes_plugin(raiz, plugin_root=None):
+    """As instalações do plugin que valem para o projeto `raiz`, lidas do installed_plugins.json.
+
+    Vale a do escopo user e as project/local cujo projectPath é a raiz. Descarta (com motivo) a sem pasta e a
+    desativada (enabledPlugins = false no settings do escopo). Vence a versão mais nova; no empate, a user.
+    Devolve {arquivo, todas, validas, vencedora, esta, no_json, esta_vence}: `esta` é a entrada desta cópia do
+    plugin entre as que valem aqui, `no_json` diz se a cópia aparece no JSON (não aparece com --plugin-dir) e
+    `esta_vence` diz se o hook desta cópia deve gravar."""
+    plugin_root = plugin_root or RAIZ_PLUGIN
+    cfgdir = pasta_config_claude()
+    arq = os.path.join(cfgdir, "plugins", "installed_plugins.json")
+    nome = nome_plugin()
+    todas, no_json = [], False
+    for chave, lst in (_ler_json(arq).get("plugins") or {}).items():
+        if chave.split("@", 1)[0] != nome or not isinstance(lst, list):
+            continue
+        for e in lst:
+            if not isinstance(e, dict):
+                continue
+            no_json = no_json or mesmo_caminho(e.get("installPath"), plugin_root)
+            escopo = e.get("scope") or "user"
+            proj = e.get("projectPath") or ""
+            if escopo != "user" and not mesmo_caminho(proj, raiz):
+                continue  # instalação de outro projeto
+            pasta = e.get("installPath") or ""
+            if escopo == "user":
+                sett = os.path.join(cfgdir, "settings.json")
+            else:
+                sett = os.path.join(proj, ".claude", "settings.local.json" if escopo == "local" else "settings.json")
+            motivo = ""
+            if not pasta or not os.path.isdir(pasta):
+                motivo = "sem pasta"
+            elif not _ativado(sett, chave):
+                motivo = "desativada"
+            todas.append({"chave": chave, "escopo": escopo, "versao": str(e.get("version") or "?"),
+                          "pasta": pasta, "projeto": proj, "descartada": motivo,
+                          "esta": mesmo_caminho(pasta, plugin_root)})
+    validas = [x for x in todas if not x["descartada"]]
+    validas.sort(key=lambda x: (tuple(-n for n in chave_versao(x["versao"])), ORDEM_ESCOPO.get(x["escopo"], 9)))
+    vencedora = validas[0] if validas else None
+    for x in todas:
+        x["vence"] = x is vencedora
+    esta = next((x for x in todas if x["esta"]), None)
+    # fora do JSON (--plugin-dir): roda sempre; no JSON (mesmo que como instalação de outro projeto): só se vencer
+    esta_vence = not no_json or vencedora is None or mesmo_caminho(vencedora["pasta"], plugin_root)
+    return {"arquivo": arq, "todas": todas, "validas": validas, "vencedora": vencedora, "esta": esta,
+            "no_json": no_json, "esta_vence": esta_vence}
+
+
+def comandos_corrigir_instalacoes(info):
+    """Comandos para ficar com uma instalação só (a user, na versão mais nova). [] se já há uma só."""
+    validas = info["validas"]
+    if len(validas) <= 1:
+        return []
+    chave = info["vencedora"]["chave"]
+    mk = chave.split("@", 1)[1] if "@" in chave else nome_plugin()
+    mais_nova = max(chave_versao(x["versao"]) for x in validas)
+    user = next((x for x in validas if x["escopo"] == "user"), None)
+    cmds = []
+    if user is None:
+        cmds += [f"claude plugin marketplace update {mk}", f"claude plugin install {chave} --scope user"]
+    elif chave_versao(user["versao"]) < mais_nova:
+        cmds += [f"claude plugin marketplace update {mk}", f"claude plugin update {chave} --scope user"]
+    for x in validas:
+        if x["escopo"] != "user":
+            pref = f'cd "{x["projeto"]}" && ' if x["projeto"] else ""
+            cmds.append(f"{pref}claude plugin uninstall {x['chave']} --scope {x['escopo']}")
+    return cmds
+
+
+def texto_instalacoes(info):
+    """Linhas para mostrar ao usuário: cada instalação e, se houver mais de uma valendo, como corrigir."""
+    if not info["todas"]:
+        return ["Instalações do plugin: nenhuma no installed_plugins.json (esta cópia roda por --plugin-dir)."]
+    linhas = ["Instalações do plugin que valem aqui:"]
+    for x in info["todas"]:
+        onde = f" em {x['projeto']}" if x["projeto"] else ""
+        marca = "vence" if x["vence"] else (f"descartada: {x['descartada']}" if x["descartada"] else "perde: os hooks dela não gravam")
+        linhas.append(f"  - {x['escopo']} {x['versao']}{onde} ({marca})" + (" ← esta" if x["esta"] else ""))
+    if not info["no_json"]:
+        linhas.append("  - esta cópia não está no installed_plugins.json (--plugin-dir): os hooks dela rodam")
+    cmds = comandos_corrigir_instalacoes(info)
+    if cmds:
+        linhas.append(f"ATENÇÃO: {len(info['validas'])} instalações valendo ao mesmo tempo. Só a que vence grava o "
+                      "tempo (versões anteriores à 1.12.0 não sabem disso e gravam também). Para ficar com uma só, "
+                      "no escopo user, rode no terminal (o plugin não desinstala sozinho):")
+        linhas += [f"    {cmd}" for cmd in cmds]
+        linhas.append("  Depois, numa sessão aberta: /reload-plugins.")
+    return linhas
+
+
 # ---------------------------------------------------------------- Windows: texto e caminhos
 
 def utf8_io():

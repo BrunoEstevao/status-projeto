@@ -635,8 +635,33 @@ def cmd_estado(a):
         "chamadas_autonomas": chamadas_autonomas(raiz),
         "fatias_fora_da_pasta": fatias_fora_da_pasta(raiz, cfg),
         "hooks_manuais_antigos": hooks_manuais(raiz),
+        "instalacoes_plugin": json_instalacoes(raiz),
+        "enabled_plugins_antigo": enabled_antigo(settings_projeto(raiz, estrito=False)[1]),
     }
     print(json.dumps(saida, ensure_ascii=False, indent=2))
+
+
+def json_instalacoes(raiz):
+    info = c.instalacoes_plugin(raiz)
+    return {"arquivo": info["arquivo"],
+            "todas": [{k: x[k] for k in ("chave", "escopo", "versao", "pasta", "projeto", "descartada", "vence", "esta")}
+                      for x in info["todas"]],
+            "validas": len(info["validas"]),
+            "duplicadas": len(info["validas"]) > 1,
+            "esta_vence": info["esta_vence"],
+            "comandos_corrigir": c.comandos_corrigir_instalacoes(info),
+            "texto": "\n".join(c.texto_instalacoes(info))}
+
+
+def cmd_instalacoes(a):
+    """Mostra as instalações do plugin que valem aqui e, se houver mais de uma, os comandos para corrigir.
+    Código 3 quando há mais de uma valendo. Não desinstala nada."""
+    info = c.instalacoes_plugin(a.raiz)
+    if a.json:
+        print(json.dumps(json_instalacoes(a.raiz), ensure_ascii=False, indent=2))
+    else:
+        print("\n".join(c.texto_instalacoes(info)))
+    sys.exit(3 if len(info["validas"]) > 1 else 0)
 
 
 def cmd_init(a):
@@ -1128,7 +1153,7 @@ def fonte_marketplace():
             nome_mk = json.load(f).get("name", nome_mk)
     except Exception:
         pass
-    p = os.path.join(os.path.expanduser("~"), ".claude", "plugins", "known_marketplaces.json")
+    p = os.path.join(c.pasta_config_claude(), "plugins", "known_marketplaces.json")
     try:
         with open(p, encoding="utf-8") as f:
             conhecidos = json.load(f)
@@ -1138,6 +1163,46 @@ def fonte_marketplace():
     return nome_mk, (ent or {}).get("source")
 
 
+def settings_projeto(raiz, estrito=True):
+    """(caminho, dict) do .claude/settings.json do projeto. JSON inválido: sai sem mexer (ou {} se não estrito)."""
+    p = os.path.join(raiz, ".claude", "settings.json")
+    try:
+        sett = json.loads(ler(p, "{}") or "{}")
+    except ValueError:
+        if not estrito:
+            return p, {}
+        sair(f"{p} não é um JSON válido; nada foi mexido.")
+    return p, sett if isinstance(sett, dict) else {}
+
+
+def enabled_antigo(sett):
+    """As entradas status-projeto@... = true em enabledPlugins (gravadas pela etapa hooks até a 1.11.0)."""
+    nome = c.nome_plugin()
+    ep = sett.get("enabledPlugins")
+    if not isinstance(ep, dict):
+        return []
+    return [k for k, v in ep.items() if k.split("@", 1)[0] == nome and v is True]
+
+
+def tirar_enabled_antigo(raiz):
+    """Tira do .claude/settings.json do projeto o enabledPlugins do status-projeto, mostrando antes o que sai.
+    Essa entrada faz o Claude Code oferecer a instalação em escopo project (uma segunda instalação)."""
+    p, sett = settings_projeto(raiz)
+    chaves = enabled_antigo(sett)
+    if not chaves:
+        return False
+    print(".claude/settings.json: tirando a entrada que fazia o Claude Code oferecer uma 2ª instalação "
+          "(escopo project):")
+    for k in chaves:
+        print(f'    "enabledPlugins": {{ "{k}": true }}')
+        del sett["enabledPlugins"][k]
+    if not sett["enabledPlugins"]:
+        del sett["enabledPlugins"]
+    escrever(p, json.dumps(sett, ensure_ascii=False, indent=2) + "\n")
+    print("  (o extraKnownMarketplaces fica; o plugin continua valendo pela instalação no escopo user)")
+    return True
+
+
 def cmd_hooks(a):
     raiz = a.raiz
     cfg = precisa_config(raiz)
@@ -1145,17 +1210,12 @@ def cmd_hooks(a):
     if not os.path.exists(hooks_json):
         sair("hooks/hooks.json do plugin não encontrado.")
     nome_mk, fonte = fonte_marketplace()
-    p = os.path.join(raiz, ".claude", "settings.json")
-    try:
-        sett = json.loads(ler(p, "{}") or "{}")
-    except ValueError:
-        sair(f"{p} não é um JSON válido; nada foi mexido.")
+    tirar_enabled_antigo(raiz)
+    p, sett = settings_projeto(raiz)
     mudou = False
-    chave = f"status-projeto@{nome_mk}"
     if fonte:
-        if sett.setdefault("enabledPlugins", {}).get(chave) is not True:
-            sett["enabledPlugins"][chave] = True
-            mudou = True
+        # Só o marketplace. enabledPlugins aqui faria o Claude Code oferecer instalar em escopo project, e o plugin
+        # ficaria instalado duas vezes (user + project), com versões diferentes.
         mks = sett.setdefault("extraKnownMarketplaces", {})
         if mks.get(nome_mk, {}).get("source") != fonte:
             mks[nome_mk] = {"source": fonte}
@@ -1165,8 +1225,8 @@ def cmd_hooks(a):
         escrever(p, json.dumps(sett, ensure_ascii=False, indent=2) + "\n")
     print("Hooks de tempo: vêm do plugin (hooks/hooks.json): SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd.")
     if fonte:
-        print(f".claude/settings.json: plugin {chave} " + ("registrado" if mudou else "já registrado")
-              + " (quem abrir o repo — inclusive no Claude Code na web — recebe o convite para instalar).")
+        print(f".claude/settings.json: marketplace {nome_mk} " + ("registrado" if mudou else "já registrado")
+              + " (quem abrir o repo conhece o marketplace; instale o plugin com --scope user).")
     else:
         print("Aviso: o plugin não veio de um marketplace conhecido (ex.: --plugin-dir); "
               ".claude/settings.json do projeto não foi mexido.")
@@ -1411,6 +1471,7 @@ def cmd_atualizar(a):
     cfg["versao_plugin"] = c.versao_plugin()
     c.gravar_config(raiz, cfg)
     print(f"Config migrado ({antes} → {cfg['versao_plugin']}); nada foi apagado.")
+    tirar_enabled_antigo(raiz)
     texto = ler(os.path.join(raiz, "CLAUDE.md"))
     if MARCA_INI in texto:
         novo = re.sub(re.escape(MARCA_INI) + r".*?" + re.escape(MARCA_FIM), lambda _: bloco_regras(cfg, raiz), texto,
@@ -1912,6 +1973,10 @@ def cmd_verificar(a):
     def ok(cond, txt, dica=""):
         res.append((bool(cond), txt, dica))
 
+    info = c.instalacoes_plugin(raiz)
+    print("\n".join(c.texto_instalacoes(info)) + "\n")
+    ok(len(info["validas"]) <= 1, f"uma instalação só do plugin valendo aqui ({len(info['validas'])})",
+       "veja os comandos acima (o plugin não desinstala sozinho)")
     ok(cfg is not None, "config .claude-status/config.json", "rode /instalar-status")
     if cfg is None:
         for b, t, d in res:
@@ -1940,6 +2005,8 @@ def cmd_verificar(a):
        "hooks gravando esta sessão em docs/tempo/sessoes.csv",
        "o plugin está ativo? (/plugin → status-projeto habilitado; depois /reload-plugins)")
     ok(not hooks_manuais(raiz), "sem hooks de tempo manuais duplicados", ", ".join(hooks_manuais(raiz)))
+    ok(not enabled_antigo(settings_projeto(raiz, estrito=False)[1]), "sem enabledPlugins do plugin no .claude/settings.json",
+       "faz o Claude Code oferecer uma 2ª instalação (project): rode /instalar-status → Atualizar")
     ga = ler(os.path.join(raiz, ".gitattributes"))
     ok(all(tem_union(ga, x) for x in UNION), ".gitattributes com merge=union no sessoes.csv, IDEIAS.md e ERROS.md",
        "rode /instalar-status → reparar")
@@ -2233,6 +2300,8 @@ def main():
     x = s.add_parser("colar", help="grava em IDEIAS.md/ERROS.md uma linha pronta (a que o claude.ai mostra)")
     x.add_argument("linha", nargs="+")
     s.add_parser("verificar", help="confere a integração")
+    x = s.add_parser("instalacoes", help="instalações do plugin que valem aqui (user/project) e como ficar com uma")
+    x.add_argument("--json", action="store_true")
 
     c.utf8_io()
     a = p.parse_args()

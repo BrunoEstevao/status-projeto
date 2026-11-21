@@ -52,20 +52,18 @@ O que o `/instalar-status` resolve sozinho, sempre perguntando antes (a opção 
 
 Sem Python, os hooks de tempo saem em silêncio (nada de "hook failed"); só não medem o tempo até o Python existir.
 
-**1. Instale o plugin** (uma vez por computador). Dentro do Claude Code:
-
-```
-/plugin marketplace add BrunoEstevao/status-projeto
-/plugin install status-projeto@status-projeto
-/reload-plugins
-```
-
-Ou pelo terminal:
+**1. Instale o plugin** (uma vez por computador, **sempre no escopo user**). Pelo terminal:
 
 ```bash
 claude plugin marketplace add BrunoEstevao/status-projeto
-claude plugin install status-projeto@status-projeto
+claude plugin install status-projeto@status-projeto --scope user
 ```
+
+Ou dentro do Claude Code: `/plugin marketplace add BrunoEstevao/status-projeto`, depois `/plugin` → aba
+**Discover** → `status-projeto` → instalar escolhendo o escopo **user**, e `/reload-plugins`.
+
+Não instale também no escopo project (nem aceite o convite "instalar para este projeto"): o plugin ficaria duas vezes,
+cada uma numa versão. Veja [Duas instalações ao mesmo tempo](#duas-instalações-ao-mesmo-tempo).
 
 (Para testar a partir de uma pasta local:
 `/plugin marketplace add /caminho/para/status-projeto`.)
@@ -154,6 +152,7 @@ push); se não conseguir gravar, ele diz que não gravou e mostra a linha pronta
 | `status-projeto status-md --cortar-concluidos` | mantém no ✅ só os últimos 7 dias (ou `--dias N`); os mais antigos vão para `docs/CONCLUIDOS.md` e o ✅ fecha com "Versões anteriores: ver ..." |
 | `/status-valor 180` | muda o valor da hora daqui para frente, sem efeito retroativo |
 | `/verificar-integracao` | confere tudo no repo e entrega a frase para testar no claude.ai |
+| `status-projeto instalacoes` | instalações do plugin que valem neste projeto (user, project, local), qual vence e, se houver mais de uma, os comandos para ficar com uma só |
 
 Se outro plugin usar o mesmo nome, use o nome completo: `/status-projeto:status-relatorio`.
 
@@ -170,7 +169,7 @@ Se outro plugin usar o mesmo nome, use o nome completo: `/status-projeto:status-
 | `IDEIAS.md`, `ERROS.md` | ideias pendentes e erros a corrigir, uma linha por registro (nada é apagado) | sim (com `merge=union`) |
 | `docs/COMO_USAR_STATUS.md` | o guia "ATENÇÃO — LEIA ANTES DE COMEÇAR" | sim |
 | `.gitattributes`, `.gitignore` | `merge=union` no CSV, no `IDEIAS.md` e no `ERROS.md`; trava e estado local fora do git | sim |
-| `.claude/settings.json` | registra o plugin no projeto (quem abrir o repo recebe o convite para instalar) | sim |
+| `.claude/settings.json` | registra só o marketplace (`extraKnownMarketplaces`); não grava `enabledPlugins`, que levaria a uma 2ª instalação em escopo project | sim |
 | `.claude-status/local/`, `docs/tempo/*.lock` | estado desta máquina | não |
 
 **Privacidade:** o CSV guarda só data/hora, nome do repo, nome da fatia, tipo, id da sessão e estado. O texto das
@@ -213,14 +212,12 @@ descontando o tempo em que dois repos andaram juntos. Um repo irmão sem o plugi
 
 ```bash
 claude plugin marketplace update status-projeto
-claude plugin update status-projeto@status-projeto
+claude plugin update status-projeto@status-projeto --scope user
 ```
 
-O primeiro comando só baixa o catálogo novo e não troca a versão instalada; quem atualiza é o segundo. Sem `--scope`, o
-`update` atualiza a instalação mais específica da pasta onde você está (local → projeto → usuário). O plugin pode
-estar instalado em mais de um escopo: o `/instalar-status` registra o plugin no `.claude/settings.json` do projeto.
-Para escolher um escopo, use `--scope project` ou `--scope user`, e rode o comando uma vez para cada instalação.
-Versões antigas do Claude Code assumiam `user` quando faltava o `--scope`; na dúvida, passe o `--scope`.
+O primeiro comando só baixa o catálogo novo e não troca a versão instalada; quem atualiza é o segundo. Passe sempre o
+`--scope user`: sem ele, o `update` atualiza a instalação mais específica da pasta onde você está (local → projeto →
+usuário), e uma instalação de projeto esquecida seria atualizada no lugar da sua.
 
 **Dentro da sessão:** `/plugin` → aba **Installed** → `status-projeto` → **Update now**. (Digitar `/plugin update ...`
 com argumentos pode só abrir esse gerenciador, sem atualizar nada.)
@@ -231,6 +228,34 @@ Depois rode `/instalar-status` em cada projeto e escolha **Atualizar**. Isso com
 regrava só o bloco de regras do `CLAUDE.md` e o guia. O `STATUS.md`, o `sessoes.csv` e a estimativa nunca são tocados.
 Instalações antigas continuam funcionando mesmo sem atualizar, porque campos que faltam no config ganham o valor
 padrão na leitura.
+
+## Duas instalações ao mesmo tempo
+
+O Claude Code deixa o mesmo plugin instalado em mais de um escopo: **user** (vale em todos os projetos) e **project**
+ou **local** (só numa pasta). Quando os dois valem no mesmo projeto, os dois rodam, cada um na sua versão. O sintoma:
+você atualiza e o projeto continua com o comportamento antigo, ou o tempo aparece contado duas vezes.
+
+Até a 1.11.0, a etapa hooks do `/instalar-status` gravava `enabledPlugins` no `.claude/settings.json` do projeto, e
+é isso que faz o Claude Code oferecer a instalação em escopo project a quem abre o repo. Desde a 1.12.0:
+
+- a etapa hooks grava só o `extraKnownMarketplaces` (o marketplace) e o **Atualizar** tira o `enabledPlugins` do
+  status-projeto dos projetos que já têm, mostrando antes o que sai;
+- com mais de uma instalação valendo, só a que vence grava o tempo: a **versão mais nova** e, no empate, a **user**.
+  As outras saem em silêncio. Instalações sem pasta ou desativadas não contam. Uma cópia carregada com
+  `--plugin-dir` (fora do `installed_plugins.json`) roda sempre;
+- `status-projeto instalacoes`, `/verificar-integracao` e `/instalar-status` mostram as instalações e, quando há
+  mais de uma, os comandos para corrigir. **O plugin não desinstala nada sozinho.**
+
+Versões anteriores à 1.12.0 não sabem qual vence e gravam sempre. Por isso, fique com uma só, no escopo user:
+
+```bash
+claude plugin marketplace update status-projeto
+claude plugin update status-projeto@status-projeto --scope user
+cd /caminho/do/projeto && claude plugin uninstall status-projeto@status-projeto --scope project
+```
+
+(Use `--scope local` se for essa a instalação a mais.) Depois, numa sessão aberta, rode `/reload-plugins`. Para ver a
+situação de um projeto: `status-projeto instalacoes` na pasta dele (código 3 = mais de uma valendo).
 
 ## Desinstalar
 

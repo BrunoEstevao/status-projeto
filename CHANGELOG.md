@@ -5,6 +5,30 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.12.0] — 2026-11-21
+### Adicionado
+- Instalado em mais de um escopo (ex.: user 1.11.0 + project 1.1.0 no mesmo projeto): `comum.instalacoes_plugin`
+  lê o `installed_plugins.json` (em `~/.claude/plugins` ou `$CLAUDE_CONFIG_DIR/plugins`), considera só as
+  instalações que valem para o projeto (a user e as project/local daquela pasta), descarta as sem pasta e as
+  desativadas (`enabledPlugins` = false no settings do escopo) e escolhe a que vence: a versão mais nova e, no
+  empate, a user.
+- `status-projeto instalacoes [--json]`: mostra as instalações e, com mais de uma valendo, os comandos para ficar com
+  uma só no escopo user (código 3). `estado` traz `instalacoes_plugin` e `enabled_plugins_antigo`; `verificar`
+  mostra as instalações no começo e marca ❌ quando há mais de uma ou quando o `enabledPlugins` antigo continua no
+  `.claude/settings.json`.
+- `/instalar-status` e `/verificar-integracao` avisam das instalações duplicadas antes de tudo, com os comandos. Não
+  desinstalam nem atualizam o plugin sozinhos.
+### Mudado
+- Hook de tempo: se esta cópia está no `installed_plugins.json` e não é a que vence, sai em silêncio (código 0), e só
+  a vencedora grava. Cópia fora do JSON (`--plugin-dir`) roda normalmente.
+- README: instalar e atualizar sempre com `--scope user`; seção nova "Duas instalações ao mesmo tempo".
+### Corrigido
+- Causa da instalação dupla: a etapa `hooks` gravava `enabledPlugins` no `.claude/settings.json` de cada projeto, o
+  que fazia o Claude Code oferecer a instalação em escopo project. Agora grava só o `extraKnownMarketplaces`. O
+  `atualizar` (e a etapa `hooks`, quando roda de novo) tira o `enabledPlugins` do status-projeto dos projetos que já
+  têm, mostrando antes o que sai, e não mexe nas entradas de outros plugins.
+- `fonte_marketplace` lê o `known_marketplaces.json` também em `$CLAUDE_CONFIG_DIR`.
+
 ## [1.11.0] — 2026-11-21
 ### Adicionado
 - Windows: o Python é achado sozinho, nesta ordem: `python3`, `python`, `py -3` (o primeiro que for Python 3.8+; o

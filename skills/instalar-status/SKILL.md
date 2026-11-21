@@ -69,6 +69,14 @@ projeto_novo, status_md, claude_md, pastas_fatias_detectadas, fatias_soltas_na_r
 hooks_manuais_antigos).
 Se `git.repo_git` for false (o passo 0a já cuidou disso) ou `git.pasta_pessoal` for true, volte ao passo 0a.
 
+**Antes de tudo (antes do passo 1 e de qualquer pergunta):** se `instalacoes_plugin.duplicadas` for true, o plugin
+está instalado mais de uma vez valendo neste projeto (ex.: user 1.11.0 + project 1.1.0). Mostre
+`instalacoes_plugin.texto` inteiro num bloco de código e diga em uma linha: "só a instalação que vence grava o tempo,
+mas versões anteriores à 1.12.0 gravam também; rode os comandos acima no terminal (ou com `!` na frente) para ficar
+com uma só, no escopo user". **Não desinstale nem atualize o plugin você mesmo**, nem rode esses comandos: só o
+usuário. Depois siga normalmente. Se `enabled_plugins_antigo` não estiver vazio, avise que o Atualizar tira essa
+entrada do `.claude/settings.json` (é ela que faz o Claude Code oferecer a instalação em escopo project).
+
 ## Passo 1 — já instalado?
 - `instalacao_completa: true` → **não reinstale.** Se os argumentos trouxerem `sair`, `verificar`, `reparar` ou
   `atualizar`, use essa escolha sem perguntar. Senão, rode `status-projeto reparar` (só consulta) e pergunte
@@ -81,7 +89,8 @@ Se `git.repo_git` for false (o passo 0a já cuidou disso) ou `git.pasta_pessoal`
   (rode o /verificar-integracao: `status-projeto verificar`), e **Sair** por último.
   - Reparar: `status-projeto reparar` lista o que falta ou quebrou; refaça **só esses itens** seguindo o passo
     correspondente abaixo. Nunca recrie STATUS.md por cima; se ele sumiu, ofereça restaurar do git.
-  - Atualizar: `status-projeto atualizar` (migra o config, regrava só o bloco do CLAUDE.md e o guia, cria
+  - Atualizar: `status-projeto atualizar` (migra o config, tira o `enabledPlugins` do status-projeto do
+    `.claude/settings.json` — mostra antes o que sai —, regrava só o bloco do CLAUDE.md e o guia, cria
     `IDEIAS.md`/`ERROS.md` se faltarem e põe o merge=union deles no `.gitattributes`), depois
     `status-projeto reparar` e trate o que aparecer. Mostre o que mudou do CHANGELOG do plugin
     (`${CLAUDE_PLUGIN_ROOT}/CHANGELOG.md`) entre `versao_plugin_instalada` e `versao_plugin`.
@@ -226,8 +235,10 @@ regras ficam valendo" · **Pular**. Se alguma seção achada tiver regra que nã
 commit), diga que ela fica e que você só tira a parte de status.
 
 ## Passo 6 — etapa `hooks`
-`status-projeto hooks`. Os hooks vêm do próprio plugin; o comando registra o plugin no `.claude/settings.json` do
-projeto (para quem abrir o repo, inclusive no Claude Code na web). Se avisar de **hooks manuais antigos**, mostre e
+`status-projeto hooks`. Os hooks vêm do próprio plugin; o comando registra só o **marketplace**
+(`extraKnownMarketplaces`) no `.claude/settings.json` do projeto. Ele **não** grava `enabledPlugins` (isso fazia o
+Claude Code oferecer uma 2ª instalação, em escopo project) e tira a entrada se uma versão antiga gravou. O plugin é
+instalado uma vez por computador, com `--scope user`. Se avisar de **hooks manuais antigos**, mostre e
 pergunte (AskUserQuestion): **Tirar os hooks antigos (Recomendado)** — motivo: "a mesma sessão seria contada duas vezes
 no relatório" · **Manter**. Só edite com o sim. Se o hook antigo fizer mais coisa além de medir tempo, não recomende:
 diga que depende de o usuário ainda precisar dessa outra função e proponha tirar só a parte do tempo.
