@@ -311,7 +311,7 @@ json.dump(d, open(p, "w"))
 PY
 }
 for cmd in relatorio "relatorio --todos" historico cronograma resumo ajuda contradicoes "contradicoes --json" \
-           "contradicoes --ignoradas" guia estado espalhado fatias-soltas autonomo github verificar reparar; do
+           "contradicoes --ignoradas" guia estado espalhado fatias-soltas autonomo "excecao --listar" github verificar reparar; do
   velho; F1="$(foto)"; $SP --raiz "$H" $cmd > /dev/null 2>&1; F2="$(foto)"
   checa "$cmd não grava" '[ "$F1" = "$F2" ]'
 done
@@ -464,6 +464,31 @@ checa "ps1: linha \$env antes do Start-Process, com o mesmo recuo" "sed -n 3p $U
 checa "depois de aplicar, nenhuma chamada aplicável sem a variável" "$SP --raiz $U autonomo --json | python3 -c \"import json,sys;assert all(x['ja_tem'] or not x['aplicavel'] for x in json.load(sys.stdin))\""
 checa ".js não é editado sozinho (pede edição à mão)" "! $SP --raiz $U autonomo --aplicar agente.js:1 2>/dev/null && grep -qx 'spawn(\"claude\", \[\"-p\", prompt\])' $U/agente.js"
 checa "estado traz chamadas_autonomas" "$SP --raiz $U estado | grep -q '\"chamadas_autonomas\"'"
+
+echo "== 16. Exceção à regra de status: arquivo lido por código, registrado fora do bloco"
+W="$BASE/excecao"; rm -rf "$W"; mkdir -p "$W/scripts"; git -C "$W" init -q -b main; ( cd "$W" && git commit -q --allow-empty -m i )
+( cd "$W" && $SP init --usuario T > /dev/null && $SP status-md --vazio --marcar > /dev/null && $SP claude-md > /dev/null )
+printf '# Pendências\n- [ ] a\n- [x] b\n- [ ] c\n' > "$W/PENDENCIAS.md"; printf '# Progresso\n' > "$W/V3-PROGRESSO.md"; printf '# só\n' > "$W/PROGRESSO.md"
+printf 'const p = fs.readFileSync("PENDENCIAS.md", "utf8")\n// PROGRESSO.md em comentário não conta\nler("V3-PROGRESSO.md")\n' > "$W/scripts/versao.js"
+ESP="$($SP --raiz $W espalhado --json)"
+lido() { python3 -c "import json,sys;d={x['arquivo']:x['lido_por'] for x in json.load(sys.stdin)};print(d.get('$1'))" <<<"$ESP"; }
+checa "PENDENCIAS.md lido por scripts/versao.js:1" "[ \"\$(lido PENDENCIAS.md)\" = \"['scripts/versao.js:1']\" ]"
+checa "PROGRESSO.md não casa dentro de V3-PROGRESSO.md nem em comentário" "[ \"\$(lido PROGRESSO.md)\" = '[]' ]"
+$SP --raiz "$W" excecao PENDENCIAS.md --motivo "lido pelo versao:fechar" > /dev/null
+checa "exceção gravada fora do bloco do plugin" "python3 - $W/CLAUDE.md <<'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+fora = re.sub(r'<!-- status-projeto:inicio.*?<!-- status-projeto:fim -->', '', t, flags=re.S)
+assert '## Exceções à regra de status (status-projeto)' in fora and '- \`PENDENCIAS.md\` — lido pelo versao:fechar' in fora
+PY"
+B1="$(sha256sum < $W/CLAUDE.md)"; $SP --raiz "$W" excecao PENDENCIAS.md > /dev/null
+checa "registrar de novo não duplica" "[ \"\$(sha256sum < $W/CLAUDE.md)\" = \"$B1\" ]"
+$SP --raiz "$W" excecao V3-PROGRESSO.md > /dev/null
+checa "segunda exceção entra na mesma seção (motivo padrão: onde o código lê)" "[ \$(grep -c '^## Exceções' $W/CLAUDE.md) = 1 ] && grep -q '^- \`V3-PROGRESSO.md\` — lido por \`scripts/versao.js:3\`' $W/CLAUDE.md"
+checa "espalhado marca a exceção registrada" "$SP --raiz $W espalhado | grep -q 'PENDENCIAS.md .*\[exceção registrada no CLAUDE.md\]'"
+( cd "$W" && $SP atualizar > /dev/null && $SP claude-md > /dev/null ); rc=$?
+checa "atualizar e claude-md mantêm as exceções (sem tratar como regra antiga)" "[ $rc = 0 ] && grep -q 'PENDENCIAS.md\` — lido pelo versao:fechar' $W/CLAUDE.md && [ \$(grep -c 'status-projeto:inicio' $W/CLAUDE.md) = 1 ]"
+checa "sem leitor e sem --motivo é recusado" "! $SP --raiz $W excecao PROGRESSO.md 2>/dev/null"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

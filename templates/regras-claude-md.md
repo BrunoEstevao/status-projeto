@@ -1,6 +1,7 @@
 <!-- status-projeto:inicio v{{versao}} — bloco gravado pelo /instalar-status; não edite à mão entre as marcas (o /instalar-status → atualizar regrava) -->
 ## Regra de status (plugin status-projeto)
 - **Status só no `STATUS.md`.** Nenhum outro arquivo diz o que está codando, pendente, em teste ou concluído.
+  Exceção: arquivo lido por código, listado na seção "Exceções à regra de status" deste CLAUDE.md (fora deste bloco).
 - Fases do `STATUS.md`, nesta ordem:
   - 🌐 **Codando** — no máximo **3 itens, somando todos os repos do projeto**. Cada item tem três subitens:
     `Parei em:` / `Próximo passo:` / `Pendente:`. Se for abrir um 4º, avise {{usuario}} e pergunte qual sai antes.

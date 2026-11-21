@@ -105,6 +105,7 @@ Se você esquecer um teste aberto, na próxima conversa o Claude pergunta se ter
 | `/status-historico` | linha do tempo das fatias com datas, horas e custo |
 | `/status-cronograma` | projeta as fatias de 📦 pela média de horas das fatias do mesmo tamanho; avisa quando houver pouco dado medido |
 | `/status-resumo` | só o que mudou nos últimos 3 dias, por fase |
+| `status-projeto excecao ARQUIVO` | registra no CLAUDE.md (fora do bloco do plugin) um arquivo de status que o código lê, como exceção à regra "status só no STATUS.md" |
 | `status-projeto status-md --cortar-concluidos` | mantém no ✅ só os últimos 7 dias (ou `--dias N`); os mais antigos vão para `docs/CONCLUIDOS.md` e o ✅ fecha com "Versões anteriores: ver ..." |
 | `/status-valor 180` | muda o valor da hora daqui para frente, sem efeito retroativo |
 | `/verificar-integracao` | confere tudo no repo e entrega a frase para testar no claude.ai |

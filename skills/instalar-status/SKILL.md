@@ -85,6 +85,13 @@ a morar só no STATUS.md, e pergunte (AskUserQuestion) o que fazer com esses arq
 **Tirar o status desses arquivos depois (Recomendado)** — motivo: "duas fontes de status ficam diferentes com o
 tempo, e o claude.ai só lê o STATUS.md" · **Deixar como está** — descrição: "escolha se outras pessoas ou
 ferramentas usam esses arquivos". Se algum deles for de fatia, lembre que o passo 3b confere as fatias em 📦.
+**Arquivo lido pelo código** (marcado `[lido pelo código: ...]`, campo `lido_por`; ex.: `PENDENCIAS.md` lido pelo
+`versao:fechar`): antes dessa pergunta, confira no trecho citado se o código lê mesmo o arquivo (e não só cita o nome
+numa mensagem). Para cada um confirmado, pergunte (AskUserQuestion): **Registrar como exceção no CLAUDE.md
+(Recomendado)** — motivo: "o `<script>` lê esse arquivo; tirar o status dele quebraria isso" · **Tirar o status
+mesmo assim** · **Decidir depois**. Sim → `status-projeto excecao ARQUIVO --motivo "lido por <o quê>"`: grava na
+seção "Exceções à regra de status" do CLAUDE.md, **fora do bloco do plugin** (o Atualizar não apaga). Os marcados
+`[exceção registrada no CLAUDE.md]` não entram na sugestão de tirar o status.
 
 - **Projeto novo** (`projeto_novo: true`): `status-projeto status-md --vazio --marcar`.
 - **STATUS.md já existe**: não sobrescreva.

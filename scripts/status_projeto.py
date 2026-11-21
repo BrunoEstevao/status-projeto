@@ -157,6 +157,11 @@ def status_espalhado(raiz, cfg=None):
                             "fatia": rel.startswith(pf + "/") or bool(NOME_FATIA.search(os.path.basename(rel))),
                             "situacao": situacao,
                             "exemplos": [l[:100] for l in linhas[:3]]})
+    excecoes = set(excecoes_registradas(raiz))
+    lidos = leitores_de(raiz, sorted({os.path.basename(x["arquivo"]) for x in achados if not x["fatia"]}))
+    for x in achados:
+        x["excecao"] = x["arquivo"] in excecoes
+        x["lido_por"] = [] if x["fatia"] else lidos.get(os.path.basename(x["arquivo"]), [])[:5]
     achados.sort(key=lambda a: (a["fatia"], not a["pelo_nome"], -a["linhas_com_status"]))
     return achados
 
@@ -306,6 +311,86 @@ def cmd_fatias_soltas(a):
         print(f"- {g}/: {len(do_g)} arquivos de fatia (" + ", ".join(f"{n} {s}" for s, n in sit.most_common())
               + f"; {sum(x['citada_no_status'] for x in do_g)} citados no STATUS.md) — ex.: "
               + ", ".join(os.path.basename(x["arquivo"]) for x in do_g[:3]))
+
+
+# ------------------------------------------------------------------- exceções à regra "status só no STATUS.md"
+
+TITULO_EXCECOES = "## Exceções à regra de status (status-projeto)"
+EXT_CODIGO = (".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".sh", ".bash", ".ps1", ".bat", ".cmd", ".rb",
+              ".go", ".php", "package.json", "makefile")
+
+
+def leitores_de(raiz, nomes):
+    """{nome: ['arquivo:linha', ...]} — onde o código cita cada arquivo (ex.: PENDENCIAS.md lido pelo versao:fechar)."""
+    nomes = [n for n in nomes if n]
+    out = {n: [] for n in nomes}
+    if not nomes:
+        return out
+    res = {n: re.compile(r"(?<![\w.-])" + re.escape(n) + r"(?![\w])") for n in nomes}  # nome inteiro
+    for rel in sorted(arquivos_do_repo(raiz, EXT_CODIGO)):
+        if rel.startswith(c.PASTA_CFG):
+            continue
+        for i, l in enumerate(ler(os.path.join(raiz, rel)).splitlines(), 1):
+            if RE_COMENTARIO.match(l):
+                continue
+            for n in nomes:
+                if n in l and res[n].search(l):
+                    out[n].append(f"{rel}:{i}")
+    return out
+
+
+def excecoes_registradas(raiz):
+    """Arquivos listados na seção de exceções do CLAUDE.md (fora do bloco do plugin)."""
+    texto = re.sub(re.escape(MARCA_INI) + r".*?" + re.escape(MARCA_FIM), "", ler(os.path.join(raiz, "CLAUDE.md")), flags=re.S)
+    if TITULO_EXCECOES not in texto:
+        return []
+    corpo = texto.split(TITULO_EXCECOES, 1)[1]
+    corpo = re.split(r"^#{1,2} ", corpo, maxsplit=1, flags=re.M)[0]
+    return re.findall(r"^- `([^`]+)`", corpo, flags=re.M)
+
+
+def registrar_excecao(raiz, arquivo, motivo):
+    p = os.path.join(raiz, "CLAUDE.md")
+    texto = ler(p)
+    if arquivo in excecoes_registradas(raiz):
+        return False
+    linha = f"- `{arquivo}` — {motivo}. Continua sendo mantido no formato que o código espera; o status das fatias " \
+            "fica no STATUS.md."
+    if TITULO_EXCECOES in texto:
+        ini = texto.index(TITULO_EXCECOES) + len(TITULO_EXCECOES)
+        resto = texto[ini:]
+        m = re.search(r"^#{1,2} |^" + re.escape(MARCA_INI), resto, flags=re.M)
+        fim = ini + (m.start() if m else len(resto))
+        trecho = texto[ini:fim].rstrip("\n")
+        novo = texto[:ini] + trecho + "\n" + linha + "\n" + ("\n" if m else "") + texto[fim:].lstrip("\n") \
+            if m else texto[:ini] + trecho + "\n" + linha + "\n"
+    else:
+        novo = texto.rstrip("\n") + ("\n\n" if texto.strip() else "") + TITULO_EXCECOES + "\n" + \
+            "Arquivos de status que o código do projeto lê. Ficam fora do bloco do plugin (o `/instalar-status` → " \
+            "atualizar não mexe aqui).\n" + linha + "\n"
+    escrever(p, novo)
+    return True
+
+
+def cmd_excecao(a):
+    raiz = a.raiz
+    if a.listar or not a.arquivo:
+        lst = excecoes_registradas(raiz)
+        print("Exceções à regra de status no CLAUDE.md: " + (", ".join(lst) if lst else "nenhuma"))
+        return
+    arq = a.arquivo.strip().lstrip("./")
+    if not os.path.exists(os.path.join(raiz, arq)):
+        sair(f"{arq} não existe neste repositório.")
+    motivo = a.motivo.strip().rstrip(".")
+    if not motivo:
+        lidos = leitores_de(raiz, [os.path.basename(arq)])[os.path.basename(arq)]
+        if not lidos:
+            sair(f"Nenhum código cita {arq}; diga o motivo com --motivo \"lido por ...\".")
+        motivo = "lido por " + ", ".join(f"`{x}`" for x in lidos[:3])
+    if registrar_excecao(raiz, arq, motivo):
+        print(f"Exceção registrada no CLAUDE.md (seção '{TITULO_EXCECOES[3:]}', fora do bloco do plugin): {arq}")
+    else:
+        print(f"{arq} já está nas exceções; nada mudou.")
 
 
 def conflitos_claude_md(texto):
@@ -703,7 +788,9 @@ def cmd_espalhado(a):
     print("Arquivos que parecem guardar status (fora do STATUS.md):")
     fatias = [x for x in achados if x["fatia"] and not x["pelo_nome"]]
     for x in [x for x in achados if x not in fatias]:
-        tag = (" [arquivo de fatia]" if x["fatia"] else "") + ("" if x["situacao"] == "versionado" else f" [{x['situacao']}]")
+        tag = (" [arquivo de fatia]" if x["fatia"] else "") + ("" if x["situacao"] == "versionado" else f" [{x['situacao']}]") \
+            + (" [exceção registrada no CLAUDE.md]" if x["excecao"] else "") \
+            + (f" [lido pelo código: {', '.join(x['lido_por'][:2])}]" if x["lido_por"] and not x["excecao"] else "")
         print(f"- {x['arquivo']}{tag}: {x['linhas_com_status']} linhas" + (" (nome de arquivo de status)" if x["pelo_nome"] else ""))
         for e in x["exemplos"]:
             print(f"    · {e}")
@@ -1850,6 +1937,10 @@ def main():
     x.add_argument("--ajustar", action="append", metavar="TITULO=FASE",
                    help="troca uma seção fora do padrão pela fase padrão, juntando os itens (pode repetir)")
     x.add_argument("--marcar", action="store_true", help="marca a etapa status_md como feita")
+    x = s.add_parser("excecao", help="registra no CLAUDE.md (fora do bloco) um arquivo de status lido por código")
+    x.add_argument("arquivo", nargs="?", default="")
+    x.add_argument("--motivo", default="", help="ex.: \"lido pelo versao:fechar\" (padrão: onde o código cita)")
+    x.add_argument("--listar", action="store_true")
     x = s.add_parser("autonomo", help="scripts que chamam 'claude -p': confere/inclui STATUS_PROJETO_TIPO=autonomo")
     x.add_argument("--json", action="store_true")
     x.add_argument("--aplicar", action="append", metavar="ARQUIVO:LINHA", help="inclui a variável nessa chamada")

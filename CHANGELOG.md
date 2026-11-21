@@ -5,6 +5,17 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.9.0] — 2026-11-21
+### Adicionado
+- Exceções à regra "status só no STATUS.md": o `espalhado` mostra quando um arquivo de status é lido pelo código
+  (`lido_por`; ex.: `PENDENCIAS.md` lido por `packages/shared/src/versoes.ts`, o `versao:fechar`), casando o nome
+  inteiro e sem contar comentários. `status-projeto excecao ARQUIVO [--motivo ...]` registra a exceção na seção
+  "Exceções à regra de status (status-projeto)" do CLAUDE.md, **fora do bloco do plugin**: o Atualizar não apaga a
+  seção, e ela não é tratada como regra antiga. `--listar` mostra as exceções; o `espalhado` marca as registradas.
+- `/instalar-status` (passo 3): para cada arquivo de status lido pelo código, oferece registrar a exceção em vez de
+  tirar o status dele.
+- Regras do CLAUDE.md: a regra "status só no STATUS.md" cita a seção de exceções.
+
 ## [1.8.0] — 2026-11-21
 ### Adicionado
 - `status-projeto autonomo` (e `chamadas_autonomas` no `estado`): acha os scripts que rodam o Claude sozinho
