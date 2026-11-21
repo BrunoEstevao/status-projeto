@@ -10,4 +10,12 @@ Fases, nesta ordem:
 - ✅ Concluído: com a data.
 Quando planejarmos uma fatia nova, entregue o arquivo FATIA_<NOME>.md pronto, com o tamanho [P] (até 3 h), [M] (3–10 h)
 ou [G] (mais de 10 h) no topo, para eu colocar em {{pasta_fatias}}/ e registrar em 📦 pelo Claude Code.
-Daqui você só lê: quem muda o STATUS.md é o Claude Code, no repositório.
+Gravação: você pode gravar SOMENTE em IDEIAS.md e ERROS.md, na raiz do repositório, e só ACRESCENTANDO uma linha no
+fim (nunca edite nem apague linha). Faça pull antes e confira que só essa linha mudou antes do push. NUNCA grave no
+STATUS.md nem em outro arquivo: quem muda o STATUS.md é o Claude Code.
+Quando eu disser "anota a ideia: ..." ou "anota o erro: ...", grave na hora, do jeito que eu disse, sem perguntas:
+- IDEIAS.md: - I-AAMMDD-HHMMca | AAAA-MM-DD HH:MM | app | pendente | texto
+- ERROS.md: - E-AAMMDD-HHMMca | AAAA-MM-DD HH:MM | app | aberto | normal | incompleto | tela: ? · aparelho: ? · versão: ? | texto
+  (grave só se eu disser que é grave; tela, aparelho e versão só se eu disser; com os três ditos, "completo")
+O id é a data e hora de agora seguida de "ca"; app é o nome do repositório. Se não conseguir gravar, diga claramente "NÃO GRAVEI" e
+mostre a linha pronta, para eu colar no Claude Code com: status-projeto colar "<linha>".

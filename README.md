@@ -80,7 +80,8 @@ estimativa do git, nunca sobrescreve o `STATUS.md` nem o `sessoes.csv` e nunca d
 **3. Passos manuais (para o claude.ai ler o status).** O guia final traz o texto pronto, já com o nome do repo:
 liberar o repo no GitHub App do claude.ai (Configurações → Conectores → GitHub → "Claude GitHub App" →
 Corrigir/Configurar → "Only select repositories"), conferir em "Verificar status do repositório", colar as instruções
-no projeto (painel da direita → Instruções → Adicionar) e mandar a frase de teste numa sessão do projeto.
+no projeto (painel da direita → Instruções → Adicionar) e mandar a frase de teste numa sessão do projeto. Há também
+uma frase de teste para a gravação no `IDEIAS.md` (a única coisa que o claude.ai pode gravar, junto com o `ERROS.md`).
 
 ## No dia a dia
 
@@ -95,6 +96,29 @@ no projeto (painel da direita → Instruções → Adicionar) e mandar a frase d
 
 Se você esquecer um teste aberto, na próxima conversa o Claude pergunta se terminou e a que horas.
 
+## Ideias e erros
+
+Duas listas na raiz do repo, criadas pelo instalador (e pelo **Atualizar**): `IDEIAS.md` e `ERROS.md`. Cada uma tem
+uma linha por registro (id, data, app, estado e texto; no `ERROS.md` também a gravidade `grave`/`normal`, a marca
+`incompleto` e tela, aparelho e versão). **Nada é apagado**: mudar o estado acrescenta uma linha nova com o mesmo id, e
+vale a última. Os dois arquivos têm `merge=union` e não contam como status espalhado.
+
+- Ideia: `pendente` → `virou FATIA_X` | `descartada`.
+- Erro: `aberto` → `em FATIA_CORRECOES_N` → `corrigido e testado`.
+
+| Você diz no Claude Code | O que acontece |
+|---|---|
+| `anota a ideia: ...` | grava na hora, do jeito que foi dito, sem perguntas |
+| `anota o erro: ...` | grava na hora; o que faltar (tela, aparelho, versão) fica `incompleto` e é perguntado quando a lista for pedida. Erro grave: o Claude oferece virar fatia de correção no topo do 📦 |
+| `quais ideias pendentes?` | lista; ideia pendente há mais de 60 dias: pergunta se mantém ou descarta |
+| `quais erros a corrigir?` | lista e pergunta o que falta nos incompletos |
+| `monta a fatia de correção` | agrupa os erros abertos por área (tela), gera `fatias/FATIA_CORRECOES_N.md`, registra em 📦 e marca os erros |
+
+Regras: erro achado durante o teste de uma fatia em 🧪 não entra na lista (é teste reprovado, e a fatia volta para
+🌐). Em projeto com vários repos, cada item leva a etiqueta do app e é gravado no repo dele; na dúvida, o Claude
+pergunta. O claude.ai também pode anotar, mas **só** nesses dois arquivos e sempre acrescentando linha (pull antes do
+push); se não conseguir gravar, ele diz que não gravou e mostra a linha pronta para `status-projeto colar "<linha>"`.
+
 ## Comandos
 
 | Comando | Para quê |
@@ -104,7 +128,9 @@ Se você esquecer um teste aberto, na próxima conversa o Claude pergunta se ter
 | `/status-relatorio` | horas e custo: estimado × medido; interativo, autônomo, planejamento e teste separados; por fatia; equivalente em dias de 8 h. `--todos` soma os repos irmãos descontando a sobreposição |
 | `/status-historico` | linha do tempo das fatias com datas, horas e custo |
 | `/status-cronograma` | projeta as fatias de 📦 pela média de horas das fatias do mesmo tamanho; avisa quando houver pouco dado medido |
-| `/status-resumo` | só o que mudou nos últimos 3 dias, por fase |
+| `/status-resumo` | só o que mudou nos últimos 3 dias, por fase, e quantas ideias e erros estão abertos |
+| `/status-ideias` | ideias pendentes: listar, anotar, mudar o estado |
+| `/status-erros` | erros a corrigir: listar, anotar, completar, mudar o estado, montar a fatia de correção |
 | `status-projeto excecao ARQUIVO` | registra no CLAUDE.md (fora do bloco do plugin) um arquivo de status que o código lê, como exceção à regra "status só no STATUS.md" |
 | `status-projeto status-md --cortar-concluidos` | mantém no ✅ só os últimos 7 dias (ou `--dias N`); os mais antigos vão para `docs/CONCLUIDOS.md` e o ✅ fecha com "Versões anteriores: ver ..." |
 | `/status-valor 180` | muda o valor da hora daqui para frente, sem efeito retroativo |
@@ -122,8 +148,9 @@ Se outro plugin usar o mesmo nome, use o nome completo: `/status-projeto:status-
 | `docs/tempo/sessoes.csv` | tempo medido: `inicio,fim,repo,fatia,tipo,sessao,estado` | sim (com `merge=union`) |
 | `docs/tempo/estimativa_git.csv` | horas estimadas pelo git antes da instalação | sim |
 | `docs/tempo/taxa.csv` | só se o projeto já tiver: histórico do valor da hora (`vigente_desde,valor_hora,observacao`), que passa a ser a fonte do valor; o plugin só acrescenta linhas no fim | sim |
+| `IDEIAS.md`, `ERROS.md` | ideias pendentes e erros a corrigir, uma linha por registro (nada é apagado) | sim (com `merge=union`) |
 | `docs/COMO_USAR_STATUS.md` | o guia "ATENÇÃO — LEIA ANTES DE COMEÇAR" | sim |
-| `.gitattributes`, `.gitignore` | `merge=union` no CSV; trava e estado local fora do git | sim |
+| `.gitattributes`, `.gitignore` | `merge=union` no CSV, no `IDEIAS.md` e no `ERROS.md`; trava e estado local fora do git | sim |
 | `.claude/settings.json` | registra o plugin no projeto (quem abrir o repo recebe o convite para instalar) | sim |
 | `.claude-status/local/`, `docs/tempo/*.lock` | estado desta máquina | não |
 

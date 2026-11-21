@@ -45,7 +45,8 @@ Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `
   (rode o /verificar-integracao: `status-projeto verificar`), e **Sair** por último.
   - Reparar: `status-projeto reparar` lista o que falta ou quebrou; refaça **só esses itens** seguindo o passo
     correspondente abaixo. Nunca recrie STATUS.md por cima; se ele sumiu, ofereça restaurar do git.
-  - Atualizar: `status-projeto atualizar` (migra o config, regrava só o bloco do CLAUDE.md e o guia), depois
+  - Atualizar: `status-projeto atualizar` (migra o config, regrava só o bloco do CLAUDE.md e o guia, cria
+    `IDEIAS.md`/`ERROS.md` se faltarem e põe o merge=union deles no `.gitattributes`), depois
     `status-projeto reparar` e trate o que aparecer. Mostre o que mudou do CHANGELOG do plugin
     (`${CLAUDE_PLUGIN_ROOT}/CHANGELOG.md`) entre `versao_plugin_instalada` e `versao_plugin`.
     Rode também os passos 3a (fatias fora da pasta), 3b (contradições nas fatias em 📦) e 3c (corte do ✅).
@@ -206,8 +207,9 @@ Sim → `status-projeto autonomo --aplicar ARQUIVO:LINHA [...]`. No shell, a var
 `env` depois de `exec`/`nohup`/`sudo`. No `.ps1`/`.bat`, entra uma linha antes da chamada. Em `.js`/`.py`/`.json`,
 edite você mesmo, pondo a variável no env da chamada. Mostre o `git diff` dos scripts e não faça commit.
 
-## Passo 7 — etapas `gitattributes` e `gitignore`
-`status-projeto gitattributes`, depois `status-projeto gitignore` (ele já ignora sozinho a trava e o estado local,
+## Passo 7 — etapas `gitattributes` e `gitignore`, e as listas de ideias e erros
+`status-projeto gitattributes` (merge=union no `sessoes.csv`, no `IDEIAS.md` e no `ERROS.md`), `status-projeto listas`
+(cria `IDEIAS.md` e `ERROS.md` na raiz, se faltarem; nunca sobrescreve), depois `status-projeto gitignore` (ele já ignora sozinho a trava e o estado local,
 que é seguro). Se apontar arquivos do status que estão ignorados, mostre e pergunte (AskUserQuestion), a não ser que
 os argumentos já digam que pode corrigir: **Corrigir o .gitignore (Recomendado)** — motivo: "o claude.ai lê o
 status pelo GitHub, e arquivo ignorado não sobe" · **Não corrigir**. Sim → `status-projeto gitignore --corrigir`. Se continuar com problema (pasta-mãe inteira ignorada),
@@ -223,6 +225,6 @@ explique a linha que precisa mudar e pergunte antes de editar.
    COMEÇAR"**. Mostre esse bloco **inteiro** ao usuário, sem resumir (ele já traz como funciona, frases, comandos,
    fases, os passos manuais com o texto das instruções do claude.ai com o nome do repo, a frase de teste e os itens (?)).
 2. Mostre `git status --short` com o que a instalação criou/alterou e diga: "para eu fazer commit e push, escreva
-   **pode commitar**". Só com essa frase: `git add` dos arquivos da instalação (STATUS.md, CLAUDE.md, .gitattributes,
+   **pode commitar**". Só com essa frase: `git add` dos arquivos da instalação (STATUS.md, IDEIAS.md, ERROS.md, CLAUDE.md, .gitattributes,
    .gitignore, .claude-status/config.json, .claude/settings.json, docs/tempo/, docs/COMO_USAR_STATUS.md), commit
    `chore(status): instala o status-projeto` e push (se houver remote).

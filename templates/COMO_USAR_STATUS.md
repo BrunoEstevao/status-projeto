@@ -37,6 +37,26 @@ Todo item termina com **(desde DD/MM)**, a data em que entrou na fase. **(?)** =
 
 Esqueceu um teste aberto? Na próxima mensagem o Claude pergunta se terminou e a que horas.
 
+## Ideias e erros (`IDEIAS.md` e `ERROS.md`)
+Ficam na raiz do repo, uma linha por registro, e **nada é apagado**: mudar o estado acrescenta uma linha nova com o
+mesmo id. Não são status (o status continua só no `STATUS.md`).
+- Ideia: `pendente` → `virou FATIA_X` ou `descartada`.
+- Erro: `aberto` → `em FATIA_CORRECOES_N` → `corrigido e testado`; gravidade `grave` ou `normal`; `incompleto` quando
+  falta tela, aparelho ou versão.
+
+| Você diz | O que acontece |
+|---|---|
+| `anota a ideia: ...` | grava na hora, do jeito que foi dito, sem perguntas |
+| `anota o erro: ...` (ou `anota o erro grave: ...`) | grava na hora; o que faltar (tela, aparelho, versão) fica `incompleto`. Grave: o Claude oferece virar fatia de correção no topo do 📦 |
+| `quais ideias pendentes?` | lista; ideia pendente há mais de 60 dias: pergunta se mantém ou descarta |
+| `quais erros a corrigir?` | lista e pergunta o que falta nos incompletos |
+| `monta a fatia de correção` | agrupa os erros abertos por área (tela), cria `{{pasta_fatias}}/FATIA_CORRECOES_N.md`, registra em 📦 e marca os erros |
+
+- Erro achado **no teste de uma fatia em 🧪** não entra no `ERROS.md`: é teste reprovado e a fatia volta para 🌐.
+- Projeto com vários repos: cada item leva a etiqueta do app e é gravado no repo dele; na dúvida, o Claude pergunta.
+- O claude.ai também pode anotar (só nesses dois arquivos). Se ele não conseguir gravar, mostra a linha pronta: cole no
+  Claude Code com `status-projeto colar "<linha>"`.
+
 ## Comandos
 | Comando | Para quê |
 |---|---|
@@ -44,7 +64,9 @@ Esqueceu um teste aberto? Na próxima mensagem o Claude pergunta se terminou e a
 | `/status-relatorio` | horas e custo: estimado × medido; interativo, autônomo, planejamento e teste; por fatia; dias de 8 h. `--todos` soma os repos irmãos descontando a sobreposição |
 | `/status-historico` | linha do tempo das fatias com datas, horas e custo |
 | `/status-cronograma` | quando as fatias de 📦 devem ficar prontas, pela média das fatias do mesmo tamanho |
-| `/status-resumo` | só o que mudou nos últimos 3 dias, por fase |
+| `/status-resumo` | só o que mudou nos últimos 3 dias, por fase, e quantas ideias e erros estão abertos |
+| `/status-ideias` | ideias pendentes: listar, anotar, mudar o estado (virou fatia, descartada, mantida) |
+| `/status-erros` | erros a corrigir: listar, anotar, completar, mudar o estado, montar a fatia de correção |
 | `/status-valor 180` | muda o valor da hora daqui para frente (nunca retroativo) |
 | `/verificar-integracao` | confere tudo no repo e dá a frase para testar no claude.ai |
 | `/instalar-status` | rodar de novo é seguro: verifica, repara o que faltar ou atualiza |
@@ -84,5 +106,14 @@ argumentos pode só abrir o gerenciador). Depois rode `/reload-plugins` e `/inst
     ```
 
    A resposta tem que bater com o `STATUS.md` do GitHub. `/verificar-integracao` confere o lado do repo.
+   **Teste de gravação** (o claude.ai só pode gravar no `IDEIAS.md` e no `ERROS.md`), na mesma sessão:
+
+    ```text
+    {{frase_gravacao}}
+    ```
+
+   Certo: uma linha nova no fim do `IDEIAS.md` no GitHub e nada no `STATUS.md`, ou a resposta "NÃO GRAVEI" com a linha
+   pronta (cole no Claude Code com `status-projeto colar "<linha>"`). Depois diga no Claude Code
+   "descarta a ideia de teste de gravação".
 5. **Revise os itens com (?)** — o que a instalação não conseguiu comprovar pelo código e pelo git:
 {{itens_revisar}}

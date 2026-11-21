@@ -21,11 +21,11 @@ instalar() {  # simula as etapas mecânicas do /instalar-status
   ( cd "$d" &&
     $SP init --usuario "Pessoa Teste" --valor 150 --pasta-fatias fatias "$@" &&
     { [ -f STATUS.md ] && $SP status-md --marcar || $SP status-md --vazio --marcar; } &&
-    $SP estimar && $SP claude-md && $SP hooks && $SP gitattributes &&
+    $SP estimar && $SP claude-md && $SP hooks && $SP gitattributes && $SP listas &&
     $SP gitignore --corrigir && $SP guia --gravar --marcar > /dev/null ) 2>&1 | sed 's/^/    | /'
 }
 assinatura() {  # hash dos arquivos que a 2ª instalação não pode mudar
-  ( cd "$1" && sha256sum STATUS.md docs/tempo/sessoes.csv docs/tempo/estimativa_git.csv CLAUDE.md .gitattributes \
+  ( cd "$1" && sha256sum STATUS.md IDEIAS.md ERROS.md docs/tempo/sessoes.csv docs/tempo/estimativa_git.csv CLAUDE.md .gitattributes \
       .gitignore 2>/dev/null; jq -S 'del(.atualizado_em)' .claude-status/config.json 2>/dev/null \
       || python3 -c "import json,sys;d=json.load(open('.claude-status/config.json'));d.pop('atualizado_em',None);print(json.dumps(d,sort_keys=True))" )
 }
@@ -54,7 +54,7 @@ instalar "$V"
 A2="$(assinatura "$V")"; C2="$(contagens "$V")"
 checa "STATUS.md com as 5 fases" "[ \"\$(grep -c '^## [🌐📦🧪⏸✅]' $V/STATUS.md)\" = 5 ]"
 checa "estimativa: sem histórico (nada a estimar)" "grep -q 'sem historico' $V/.claude-status/config.json"
-checa "contagens iguais nas duas rodadas ($C2)" "[ \"$C1\" = \"$C2\" ] && [ \"$C2\" = 'blocos=1 union=1 gi=1 fases=5' ]"
+checa "contagens iguais nas duas rodadas ($C2)" "[ \"$C1\" = \"$C2\" ] && [ \"$C2\" = 'blocos=1 union=3 gi=1 fases=5' ]"
 checa "nenhum arquivo mudou na 2ª rodada" '[ "$A1" = "$A2" ]'
 checa "instalação completa" "$SP --raiz $V reparar | grep -q 'Nada faltando'"
 checa "remote com apelido SSH vira Dono-Teste/vazio no guia" "grep -q 'Dono-Teste/vazio' $V/docs/COMO_USAR_STATUS.md && ! grep -q '<dono>' $V/docs/COMO_USAR_STATUS.md"
@@ -114,7 +114,7 @@ B2="$(assinatura "$H")"; D2="$(contagens "$H")"
 checa "estimativa do git gravada" "[ \$(wc -l < $H/docs/tempo/estimativa_git.csv) -gt 1 ]"
 checa "estimativa não refeita na 2ª rodada" "grep -q 'não é refeita' <<<\"\$(cd $H && $SP estimar)\""
 checa "CLAUDE.md manteve o conteúdo original" "grep -q 'Use TypeScript estrito' $H/CLAUDE.md"
-checa "contagens iguais nas duas rodadas ($D2)" "[ \"$D1\" = \"$D2\" ] && [ \"$D2\" = 'blocos=1 union=1 gi=1 fases=5' ]"
+checa "contagens iguais nas duas rodadas ($D2)" "[ \"$D1\" = \"$D2\" ] && [ \"$D2\" = 'blocos=1 union=3 gi=1 fases=5' ]"
 checa "nenhum arquivo mudou na 2ª rodada" '[ "$B1" = "$B2" ]'
 checa "docs/tempo e o guia deixaram de ser ignorados" "! git -C $H check-ignore -q docs/tempo/sessoes.csv && ! git -C $H check-ignore -q docs/COMO_USAR_STATUS.md"
 checa "trava e estado local ignorados" "git -C $H check-ignore -q docs/tempo/sessoes.csv.lock && git -C $H check-ignore -q .claude-status/local/estado.json"
@@ -311,7 +311,8 @@ json.dump(d, open(p, "w"))
 PY
 }
 for cmd in relatorio "relatorio --todos" historico cronograma resumo ajuda contradicoes "contradicoes --json" \
-           "contradicoes --ignoradas" guia estado espalhado fatias-soltas autonomo "excecao --listar" github verificar reparar; do
+           "contradicoes --ignoradas" guia estado espalhado fatias-soltas autonomo "excecao --listar" github verificar reparar \
+           ideia "ideia listar --todas" erro "erro listar --todos --json" "erro fatia"; do
   velho; F1="$(foto)"; $SP --raiz "$H" $cmd > /dev/null 2>&1; F2="$(foto)"
   checa "$cmd não grava" '[ "$F1" = "$F2" ]'
 done
@@ -489,6 +490,101 @@ checa "espalhado marca a exceção registrada" "$SP --raiz $W espalhado | grep -
 ( cd "$W" && $SP atualizar > /dev/null && $SP claude-md > /dev/null ); rc=$?
 checa "atualizar e claude-md mantêm as exceções (sem tratar como regra antiga)" "[ $rc = 0 ] && grep -q 'PENDENCIAS.md\` — lido pelo versao:fechar' $W/CLAUDE.md && [ \$(grep -c 'status-projeto:inicio' $W/CLAUDE.md) = 1 ]"
 checa "sem leitor e sem --motivo é recusado" "! $SP --raiz $W excecao PROGRESSO.md 2>/dev/null"
+
+echo "== 17. Ideias e erros: IDEIAS.md e ERROS.md (nada é apagado)"
+I="$BASE/ideias"; rm -rf "$I"; mkdir -p "$I"; git -C "$I" init -q -b main
+git -C "$I" remote add origin https://github.com/Dono-Teste/ideias.git
+instalar "$I" > /dev/null
+checa "instalador cria IDEIAS.md e ERROS.md com o formato no cabeçalho" "grep -q '^Formato: \`- ID | AAAA-MM-DD HH:MM | app | estado | texto\`' $I/IDEIAS.md && grep -q 'completo/incompleto' $I/ERROS.md"
+checa ".gitattributes com merge=union nos dois" "grep -qx 'IDEIAS.md merge=union' $I/.gitattributes && grep -qx 'ERROS.md merge=union' $I/.gitattributes"
+checa "instalação completa (reparar sem nada)" "$SP --raiz $I reparar | grep -q 'Nada faltando'"
+checa "bloco do CLAUDE.md com as frases" "grep -q 'anota a ideia: ...' $I/CLAUDE.md && grep -q 'monta a fatia de correção' $I/CLAUDE.md && grep -q 'Um repo só' $I/CLAUDE.md"
+$SP --raiz "$I" ideia anotar "exportar  o relatório | em PDF" > /dev/null
+$SP --raiz "$I" erro anotar "tela de pagamento" "fecha sozinha" --tela Pagamento > /dev/null
+$SP --raiz "$I" erro anotar "botão some" --tela Login --aparelho "Moto G" --versao 2.1 > /dev/null
+regs() { grep -c '^- [IE]-' "$I/$1"; }
+checa "ideia gravada do jeito que foi dita (espaços e ' | ' limpos), estado pendente" "grep -qE '^- I-[0-9]{6}-[0-9]{4}[a-z]{2} \| [0-9-]{10} [0-9:]{5} \| ideias \| pendente \| exportar o relatório / em PDF$' $I/IDEIAS.md"
+checa "erro sem aparelho/versão fica incompleto; com os três, completo" "grep -q '| aberto | normal | incompleto | tela: Pagamento · aparelho: ? · versão: ? | tela de pagamento fecha sozinha$' $I/ERROS.md && grep -q '| completo | tela: Login · aparelho: Moto G · versão: 2.1 | botão some$' $I/ERROS.md"
+checa "dois registros no mesmo minuto ganham ids diferentes" "[ \$(grep -o '^- E-[^ ]*' $I/ERROS.md | sort -u | wc -l) = 2 ]"
+checa "IDEIAS.md e ERROS.md não contam como status espalhado" "! $SP --raiz $I espalhado | grep -qE 'IDEIAS|ERROS'"
+LST="$($SP --raiz $I erro)"
+checa "lista de erros pede o que falta nos incompletos" "grep -q 'incompleto: falta aparelho, versão' <<<\"\$LST\""
+E1="$($SP --raiz $I erro listar --json | python3 -c "import json,sys;print([x['id'] for x in json.load(sys.stdin) if x['tela']=='Pagamento'][0])")"
+N0=$(regs ERROS.md)
+$SP --raiz "$I" erro completar "$E1" --aparelho "iPhone 12" --versao 3.0 > /dev/null
+checa "completar acrescenta linha (a antiga fica) e o erro fica completo" "[ \$(regs ERROS.md) = \$((N0 + 1)) ] && grep -q 'incompleto | tela: Pagamento' $I/ERROS.md && $SP --raiz $I erro listar --json | python3 -c \"import json,sys;assert [x['marca'] for x in json.load(sys.stdin) if x['id']=='$E1']==['completo']\""
+checa "estado inválido é recusado" "! $SP --raiz $I erro estado $E1 --para resolvido 2>/dev/null && ! $SP --raiz $I ideia estado $E1 --para descartada 2>/dev/null"
+# teste aberto: erro achado no teste de uma fatia em 🧪 não entra
+mkdir -p "$I/docs/tempo"
+printf 'inicio,fim,repo,fatia,tipo,sessao,estado\n%s,,ideias,FATIA_X,teste,s1,aberta\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$I/docs/tempo/sessoes.csv"
+N1=$(regs ERROS.md); ( $SP --raiz "$I" erro anotar "falhou no teste" > /dev/null 2>&1 ); rc=$?
+checa "com teste aberto: recusa (código 3) e não grava" "[ $rc = 3 ] && [ \$(regs ERROS.md) = $N1 ]"
+$SP --raiz "$I" erro anotar "outro app quebrou" --fora-do-teste > /dev/null
+checa "--fora-do-teste grava" "grep -q 'outro app quebrou' $I/ERROS.md"
+printf 'inicio,fim,repo,fatia,tipo,sessao,estado\n' > "$I/docs/tempo/sessoes.csv"
+GR="$($SP --raiz $I erro anotar 'perde os dados ao salvar' --grave --tela Cadastro)"
+checa "erro grave sai com a oferta da fatia de correção no topo" "grep -q 'ERRO GRAVE' <<<\"\$GR\" && grep -q 'erro fatia --ids E-' <<<\"\$GR\""
+# fatia de correção
+printf '## 🌐 Codando\n(nada agora)\n\n## 📦 Fatia pronta, não iniciada\n- [M] FATIA_PRIMEIRA — já estava (desde 01/11)\n\n## 🧪 Aguardando teste\n## ⏸️ Bloqueado (externo)\n## ✅ Concluído\n' > "$I/STATUS.md"
+F1="$(sha256sum < $I/STATUS.md)"; N2=$(regs ERROS.md)
+$SP --raiz "$I" erro fatia > /dev/null
+checa "prévia da fatia não grava nada" "[ \"\$(sha256sum < $I/STATUS.md)\" = \"$F1\" ] && [ ! -e $I/fatias/FATIA_CORRECOES_1.md ] && [ \$(regs ERROS.md) = $N2 ]"
+$SP --raiz "$I" erro fatia --gravar > /dev/null
+checa "gera fatias/FATIA_CORRECOES_1.md agrupada por área (tela)" "grep -q '^## Cadastro' $I/fatias/FATIA_CORRECOES_1.md && grep -q '^## Pagamento' $I/fatias/FATIA_CORRECOES_1.md && grep -q '^## sem tela definida' $I/fatias/FATIA_CORRECOES_1.md"
+checa "com erro grave, entra no TOPO do 📦 (vira a próxima), com tamanho e data" "python3 -c \"import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;f,_=c.ler_status_arquivo('$I');n=[(i['nome'],i['tamanho'],bool(i['desde'])) for i in f['📦']];assert n==[('FATIA_CORRECOES_1','M',True),('FATIA_PRIMEIRA','M',True)],n\""
+checa "erros marcados 'em FATIA_CORRECOES_1' (linhas novas; nenhuma apagada)" "[ \$(regs ERROS.md) = \$((N2 + 4)) ] && [ \$(grep -c '| em FATIA_CORRECOES_1 |' $I/ERROS.md) = 4 ] && [ \$(grep -c '| aberto |' $I/ERROS.md) -ge 4 ]"
+checa "sem erro aberto, a fatia é recusada" "! $SP --raiz $I erro fatia 2>/dev/null"
+$SP --raiz "$I" erro anotar "texto cortado" --tela Login > /dev/null
+$SP --raiz "$I" erro fatia --gravar > /dev/null
+checa "próxima fatia é FATIA_CORRECOES_2 e vai para o fim do 📦 (sem grave)" "python3 -c \"import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;f,_=c.ler_status_arquivo('$I');assert [i['nome'] for i in f['📦']][-1]=='FATIA_CORRECOES_2'\""
+$SP --raiz "$I" erro estado --fatia FATIA_CORRECOES_1 --para corrigido > /dev/null
+checa "fatia passou: erros 'corrigido e testado' e saem da lista a corrigir" "[ \$(grep -c '| corrigido e testado |' $I/ERROS.md) = 4 ] && [ \$($SP --raiz $I erro listar --json | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') = 1 ]"
+# ideias: 60 dias, manter, virou fatia, descartar
+IV="I-$(date -d '-90 days' +%y%m%d)-0900"
+printf -- '- %s | %s 09:00 | ideias | pendente | ideia antiga\n' "$IV" "$(date -d '-90 days' +%Y-%m-%d)" >> "$I/IDEIAS.md"
+checa "ideia pendente há mais de 60 dias: lista pede para perguntar" "$SP --raiz $I ideia | grep -A1 'ideia antiga' | grep -q 'pergunte se mantém ou descarta'"
+$SP --raiz "$I" ideia estado "$IV" --para pendente > /dev/null
+checa "manter conta 60 dias de novo" "! $SP --raiz $I ideia | grep -q 'pergunte se mantém'"
+I1="$($SP --raiz $I ideia listar --json | python3 -c "import json,sys;print([x['id'] for x in json.load(sys.stdin) if 'PDF' in x['texto']][0])")"
+$SP --raiz "$I" ideia estado "$I1" --para FATIA_PDF > /dev/null; $SP --raiz "$I" ideia estado "$IV" --para descartada > /dev/null
+checa "virou FATIA_PDF / descartada: saem das pendentes, ficam em --todas" "$SP --raiz $I ideia | grep -q 'Nenhuma ideia pendente' && $SP --raiz $I ideia --todas | grep -q 'virou FATIA_PDF' && $SP --raiz $I ideia --todas | grep -q 'descartada'"
+checa "nada foi apagado do IDEIAS.md (todas as linhas antigas continuam)" "[ \$(grep -c 'ideia antiga' $I/IDEIAS.md) = 3 ] && [ \$(grep -c 'em PDF' $I/IDEIAS.md) = 2 ]"
+RES="$($SP --raiz $I resumo)"; AJ="$($SP --raiz $I ajuda)"
+checa "resumo e ajuda mostram as contagens" "grep -q 'Ideias pendentes: 0 · Erros abertos: 0 · em fatia de correção: 1' <<<\"\$RES\" && grep -q 'Ideias pendentes: 0' <<<\"\$AJ\""
+# colar (linha do claude.ai)
+LC='- I-261120-2210ca | 2026-11-20 22:10 | ideias | pendente | ideia vinda do claude.ai'
+$SP --raiz "$I" colar "$LC" > /dev/null; $SP --raiz "$I" colar "$LC" > /dev/null
+checa "colar grava a linha como veio, uma vez só" "[ \$(grep -cxF -- \"$LC\" $I/IDEIAS.md) = 1 ]"
+checa "colar recusa linha fora do formato" "! $SP --raiz $I colar 'qualquer coisa' 2>/dev/null && ! $SP --raiz $I colar '- I-261120-2210 | ontem | x' 2>/dev/null"
+# merge=union: dois lados acrescentam linhas, o git junta sem conflito
+( cd "$I" && git add -A && git commit -q -m base && git checkout -q -b ramo &&
+  $SP erro anotar "do ramo" > /dev/null && git commit -qam ramo && git checkout -q main &&
+  $SP erro anotar "da main" > /dev/null && $SP ideia anotar "ideia da main" > /dev/null && git commit -qam main )
+checa "merge com linhas dos dois lados: sem conflito, as duas ficam" "git -C $I merge -q --no-edit ramo 2>/dev/null && grep -q 'do ramo' $I/ERROS.md && grep -q 'da main' $I/ERROS.md && ! grep -q '^<<<<<<<' $I/ERROS.md"
+checa "registros do mesmo minuto em ramos diferentes continuam dois itens" "$SP --raiz $I erro | grep -q 'do ramo' && $SP --raiz $I erro | grep -q 'da main'"
+# claude.ai: grava só em IDEIAS.md/ERROS.md; guia com a frase de teste da gravação
+G="$I/docs/COMO_USAR_STATUS.md"
+checa "instruções do claude.ai: SOMENTE IDEIAS.md e ERROS.md, acrescentando, pull antes do push, nunca STATUS.md, NÃO GRAVEI" "grep -q 'gravar SOMENTE em IDEIAS.md e ERROS.md' $G && grep -q 'ACRESCENTANDO' $G && grep -q 'pull antes' $G && grep -q 'NUNCA grave no' $G && grep -q 'NÃO GRAVEI' $G && grep -q 'status-projeto colar' $G"
+checa "guia com a frase de teste da gravação e os comandos novos" "grep -q 'anota a ideia: teste de gravação pelo claude.ai' $G && grep -q '/status-ideias' $G && grep -q '/status-erros' $G"
+# vários repos: etiqueta do app e gravado no repo dele; na dúvida, pergunta
+M1="$BASE/multi_web"; M2="$BASE/multi_ios"; rm -rf "$M1" "$M2"
+for d in "$M1" "$M2"; do mkdir -p "$d"; git -C "$d" init -q -b main; ( cd "$d" && $SP init --usuario T > /dev/null && $SP listas > /dev/null ); done
+$SP --raiz "$M1" repos --adicionar ../multi_ios > /dev/null
+( $SP --raiz "$M1" ideia anotar "sem app" > /dev/null 2>&1 ); rc=$?
+checa "vários repos sem --app: código 3 (perguntar) e nada gravado" "[ $rc = 3 ] && ! grep -q 'sem app' $M1/IDEIAS.md $M2/IDEIAS.md"
+$SP --raiz "$M1" erro anotar "trava no iOS" --app multi_ios > /dev/null
+checa "--app grava no repo do app, com a etiqueta" "grep -q '| multi_ios | aberto | .*trava no iOS' $M2/ERROS.md && ! grep -q 'trava no iOS' $M1/ERROS.md"
+checa "lista do projeto junta os repos" "$SP --raiz $M1 erro | grep -q 'multi_ios .*trava no iOS'"
+checa "app que não é do projeto é recusado" "! $SP --raiz $M1 ideia anotar x --app outro 2>/dev/null"
+( cd "$M1" && $SP claude-md > /dev/null )
+checa "bloco do CLAUDE.md cita os apps e manda perguntar na dúvida" "grep -q -- '--app multi_web|multi_ios' $M1/CLAUDE.md && grep -q 'Na dúvida de qual app é, pergunte' $M1/CLAUDE.md"
+# atualizar uma instalação antiga (sem os arquivos) cria os dois e o merge=union
+rm -f "$V/IDEIAS.md" "$V/ERROS.md"; printf '# status-projeto: x\ndocs/tempo/sessoes.csv merge=union\n' > "$V/.gitattributes"
+checa "reparar aponta IDEIAS.md/ERROS.md e o merge=union faltando" "$SP --raiz $V reparar | grep -q 'listas: IDEIAS.md e ERROS.md não existem' && $SP --raiz $V reparar | grep -q 'merge=union faltando'"
+( cd "$V" && $SP atualizar > /dev/null )
+checa "atualizar cria os dois e acrescenta o merge=union (sem duplicar o do CSV)" "[ -s $V/IDEIAS.md ] && [ -s $V/ERROS.md ] && grep -qx 'ERROS.md merge=union' $V/.gitattributes && [ \$(grep -c 'sessoes.csv merge=union' $V/.gitattributes) = 1 ]"
+H_ID="$(sha256sum < $V/IDEIAS.md)"; ( cd "$V" && $SP atualizar > /dev/null && $SP listas > /dev/null )
+checa "rodar de novo não mexe nos arquivos" "[ \"\$(sha256sum < $V/IDEIAS.md)\" = \"$H_ID\" ]"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

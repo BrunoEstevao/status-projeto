@@ -5,6 +5,31 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.10.0] — 2026-11-21
+### Adicionado
+- Ideias pendentes e erros a corrigir: `IDEIAS.md` e `ERROS.md` na raiz do repo, criados pelo instalador
+  (`status-projeto listas`) e pelo Atualizar, com `merge=union` no `.gitattributes`. Uma linha por registro (id, data,
+  app, estado, texto; no `ERROS.md` também gravidade `grave`/`normal`, `completo`/`incompleto` e tela · aparelho ·
+  versão). Nada é apagado: mudar o estado acrescenta uma linha com o mesmo id e vale a última. Não contam como status
+  espalhado e entram na lista do `.gitignore` que precisa ir para o git.
+- Estados: ideia `pendente` → `virou FATIA_X` | `descartada`; erro `aberto` → `em FATIA_CORRECOES_N` →
+  `corrigido e testado`.
+- `status-projeto ideia [listar|anotar|estado]` e `status-projeto erro [listar|anotar|completar|estado|fatia]`.
+  `erro anotar` recusa (código 3) quando há teste aberto: erro no teste de uma fatia em 🧪 é teste reprovado
+  (`--fora-do-teste` quando não é daquela fatia); erro grave sai com a sugestão de virar fatia de correção.
+  `erro fatia` mostra a prévia e, com `--gravar`, cria `fatias/FATIA_CORRECOES_N.md` com os erros abertos agrupados por
+  área (tela), registra em 📦 (no topo se houver erro grave) e marca os erros `em FATIA_CORRECOES_N`.
+  Ideia pendente há mais de 60 dias aparece marcada para perguntar se mantém ou descarta. Projeto com vários repos:
+  cada item leva a etiqueta do app e vai para o repo dele; sem `--app`, o comando pede para perguntar (código 3).
+- `status-projeto colar "<linha>"`: grava a linha pronta que o claude.ai mostra quando não consegue gravar.
+- Skills `/status-ideias` e `/status-erros`. O `/status-resumo` e o `/status-ajuda` mostram quantas ideias e erros
+  estão abertos. Regras do CLAUDE.md com as frases "anota a ideia: ...", "anota o erro: ...", "quais ideias
+  pendentes?", "quais erros a corrigir?" e "monta a fatia de correção"; guia e README atualizados.
+- Instruções do claude.ai: a sessão pode gravar **só** em `IDEIAS.md` e `ERROS.md`, sempre acrescentando linha, com
+  pull antes do push; nunca no `STATUS.md`. Se não gravar, diz "NÃO GRAVEI" e mostra a linha pronta. O guia e o
+  `/verificar-integracao` trazem uma frase de teste da gravação.
+- `reparar`/`verificar` apontam `IDEIAS.md`/`ERROS.md` ou o `merge=union` deles faltando.
+
 ## [1.9.0] — 2026-11-21
 ### Adicionado
 - Exceções à regra "status só no STATUS.md": o `espalhado` mostra quando um arquivo de status é lido pelo código

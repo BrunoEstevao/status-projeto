@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import comum as c  # noqa: E402
+import listas as L  # noqa: E402
 
 TEMPLATES = os.path.join(c.RAIZ_PLUGIN, "templates")
 MARCA_INI = "<!-- status-projeto:inicio"
@@ -139,7 +140,7 @@ def arquivos_do_repo(raiz, exts=(".md", ".txt")):
 
 
 def status_espalhado(raiz, cfg=None):
-    ignorar = {"STATUS.md", "CHANGELOG.md", c.GUIA}
+    ignorar = {"STATUS.md", "CHANGELOG.md", c.GUIA, L.ARQ["ideia"], L.ARQ["erro"]}
     pf = (cfg or {}).get("pasta_fatias", "fatias")
     achados = []
     todos = arquivos_do_repo(raiz)
@@ -870,7 +871,7 @@ def contradicoes_linha(linha, cfg):
     # 2. .gitignore
     if RE_GITIGNORE.search(linha) and not RE_GITIGNORE_OK.search(linha):
         protegidos = ["STATUS.md", "CLAUDE.md", "docs/tempo", c.GUIA, ".claude-status/config.json", ".claude-status",
-                      ".gitattributes", pf, pe]
+                      ".gitattributes", L.ARQ["ideia"], L.ARQ["erro"], pf, pe]
         alvo = [x for x in caminhos if any(dentro(x, pp) or dentro(pp, x.rstrip("/*")) or
                                             os.path.basename(x.rstrip("/")) == os.path.basename(pp) for pp in protegidos)]
         if not alvo and RE_ALVO_STATUS.search(linha):
@@ -1071,6 +1072,11 @@ def bloco_regras(cfg, raiz):
         "repos_irmaos": ("Repos irmãos deste projeto (contam para o limite de 3 em 🌐 e para o relatório com --todos): "
                          + ", ".join(irmaos) + ".") if irmaos else
                         "Este projeto tem um repo só (irmãos entram em `repos` no `.claude-status/config.json`).",
+        "listas_repos": ("Projeto com vários repos: cada ideia/erro leva a etiqueta do app (`--app "
+                         + "|".join([os.path.basename(raiz)] + [r.get("nome") or os.path.basename(r.get("caminho", ""))
+                                                               for r in cfg.get("repos", []) if isinstance(r, dict)])
+                         + "`) e é gravado no repo dele. **Na dúvida de qual app é, pergunte.**")
+                        if irmaos else "Um repo só: o app de cada ideia/erro é este repo.",
     }).strip("\n")
 
 
@@ -1168,23 +1174,40 @@ def cmd_hooks(a):
     marcar(raiz, cfg, "hooks")
 
 
+UNION = ["docs/tempo/sessoes.csv", L.ARQ["ideia"], L.ARQ["erro"]]
+
+
+def tem_union(texto, arq):
+    return bool(re.search(r"^\s*/?" + re.escape(arq) + r"\s+.*\bmerge=union\b", texto, re.M))
+
+
+def garantir_union(raiz):
+    """Acrescenta no .gitattributes o merge=union que faltar (sessoes.csv, IDEIAS.md, ERROS.md). True se mudou."""
+    p = os.path.join(raiz, ".gitattributes")
+    texto = ler(p)
+    faltam = [x for x in UNION if not tem_union(texto, x)]
+    if not faltam:
+        return False
+    novo = (texto.rstrip("\n") + "\n\n" if texto.strip() else "")
+    novo += ("# status-projeto: cada sessão/registro é uma linha; no merge, junta as linhas dos dois lados\n"
+             if not texto.count("status-projeto:") else "")
+    novo += "".join(f"{x} merge=union\n" for x in faltam)
+    escrever(p, novo)
+    return True
+
+
 def cmd_gitattributes(a):
     raiz = a.raiz
     cfg = precisa_config(raiz)
-    p = os.path.join(raiz, ".gitattributes")
-    texto = ler(p)
-    if re.search(r"^\s*/?docs/tempo/sessoes\.csv\s+.*\bmerge=union\b", texto, re.M):
-        print(".gitattributes já tem merge=union no sessoes.csv.")
+    if garantir_union(raiz):
+        print(".gitattributes: merge=union acrescentado (" + ", ".join(UNION) + ").")
     else:
-        novo = (texto.rstrip("\n") + "\n\n" if texto.strip() else "")
-        novo += ("# status-projeto: cada sessão é uma linha; no merge, junta as linhas dos dois lados\n"
-                 "docs/tempo/sessoes.csv merge=union\n")
-        escrever(p, novo)
-        print(".gitattributes: merge=union no docs/tempo/sessoes.csv acrescentado.")
+        print(".gitattributes já tem merge=union no sessoes.csv, no IDEIAS.md e no ERROS.md.")
     marcar(raiz, cfg, "gitattributes")
 
 
-DEVEM_ENTRAR = ["STATUS.md", "CLAUDE.md", ".gitattributes", c.ARQ_CFG, c.CSV_SESSOES, c.CSV_ESTIMATIVA, c.GUIA]
+DEVEM_ENTRAR = ["STATUS.md", "CLAUDE.md", ".gitattributes", c.ARQ_CFG, c.CSV_SESSOES, c.CSV_ESTIMATIVA, c.GUIA,
+                L.ARQ["ideia"], L.ARQ["erro"]]
 DEVEM_SAIR = [os.path.join(c.PASTA_LOCAL, "estado.json"), c.CSV_SESSOES + ".lock", c.CSV_SESSOES + ".tmp"]
 
 
@@ -1267,6 +1290,9 @@ def textos_claude_ai(raiz, cfg):
     return gh, instrucoes, frase
 
 
+FRASE_GRAVACAO = "anota a ideia: teste de gravação pelo claude.ai"
+
+
 def montar_guia(raiz, cfg):
     gh, instrucoes, frase = textos_claude_ai(raiz, cfg)
     revisar = itens_a_revisar(raiz)
@@ -1279,6 +1305,7 @@ def montar_guia(raiz, cfg):
         "pasta_executadas": cfg.get("pasta_fatias_executadas", "fatias_executadas"),
         "instrucoes_claude_ai": "\n".join("    " + l for l in instrucoes.splitlines()),
         "frase_teste": frase,
+        "frase_gravacao": FRASE_GRAVACAO,
         "itens_revisar": "\n".join(f"   - {x}" for x in revisar) if revisar else "   - nenhum item com (?) no STATUS.md.",
         "versao": c.versao_plugin(),
     })
@@ -1322,8 +1349,14 @@ def diagnostico(raiz, cfg):
             falta.append(("status_md", "STATUS.md sem as fases " + " ".join(f)))
     if "claude_md" in et and MARCA_INI not in ler(os.path.join(raiz, "CLAUDE.md")):
         falta.append(("claude_md", "bloco de regras sumiu do CLAUDE.md"))
-    if "gitattributes" in et and "merge=union" not in ler(os.path.join(raiz, ".gitattributes")):
-        falta.append(("gitattributes", "merge=union sumiu do .gitattributes"))
+    if "gitattributes" in et:
+        ga = ler(os.path.join(raiz, ".gitattributes"))
+        sem = [x for x in UNION if not tem_union(ga, x)]
+        if sem:
+            falta.append(("gitattributes", "merge=union faltando no .gitattributes para " + ", ".join(sem)))
+    sem_listas = [L.ARQ[t] for t in ("ideia", "erro") if not os.path.exists(L.caminho(raiz, t))]
+    if sem_listas and "status_md" in et:
+        falta.append(("listas", " e ".join(sem_listas) + " não existem (rode `status-projeto listas`)"))
     if "gitignore" in et:
         e1, e2 = checar_gitignore(raiz)
         if e1 or e2:
@@ -1376,7 +1409,12 @@ def cmd_atualizar(a):
         else:
             print(f"{c.GUIA} NÃO regenerado: falta DONO/REPO do GitHub (pergunte ao usuário e rode "
                   "`status-projeto github DONO/REPO`, depois `status-projeto guia --gravar`).")
-    print("STATUS.md, sessoes.csv e estimativa_git.csv não foram tocados.")
+    criados = L.criar_arquivos(raiz)
+    if criados:
+        print("Criados (ideias e erros): " + ", ".join(criados))
+    if "gitattributes" in cfg.get("etapas", {}) and garantir_union(raiz):
+        print(".gitattributes: merge=union no IDEIAS.md e no ERROS.md acrescentado.")
+    print("STATUS.md, sessoes.csv, estimativa_git.csv, IDEIAS.md e ERROS.md não foram reescritos.")
 
 
 def cmd_github(a):
@@ -1803,6 +1841,7 @@ def cmd_resumo(a):
         print(f"\nHoras no período: {c.horas_txt(h)} ({c.dinheiro(cu, moeda)}) — "
               + ", ".join(f"{c.NOME_TIPO[t]} {c.horas_txt(soma([b for b in rec if b.tipo == t])[0])}"
                           for t in c.TIPOS if any(b.tipo == t for b in rec)))
+    print("\n" + L.contagem_txt(raiz, cfg) + " (/status-ideias, /status-erros)")
     if not antigas:
         print("\n(sem versão do STATUS.md no git de antes do período: comparei só pelas datas \"(desde DD/MM)\")")
 
@@ -1832,6 +1871,7 @@ def cmd_ajuda(a):
         print("  STATUS.md não encontrado.")
     sess = c.ler_sessoes(os.path.join(raiz, c.CSV_SESSOES))
     teste = next((l for l in sess if l["tipo"] == "teste" and l["estado"] != "fechada"), None)
+    print("\n  " + L.contagem_txt(raiz, cfg))
     if teste:
         print(f"\n  Teste aberto desde {c.data_br(teste['inicio'])}: {teste['fatia']} (diga 'terminei o teste às HH:MM')")
     blocos, _ = coletar(raiz, cfg)
@@ -1882,8 +1922,11 @@ def cmd_verificar(a):
        "hooks gravando esta sessão em docs/tempo/sessoes.csv",
        "o plugin está ativo? (/plugin → status-projeto habilitado; depois /reload-plugins)")
     ok(not hooks_manuais(raiz), "sem hooks de tempo manuais duplicados", ", ".join(hooks_manuais(raiz)))
-    ok(re.search(r"docs/tempo/sessoes\.csv\s+.*merge=union", ler(os.path.join(raiz, ".gitattributes"))),
-       ".gitattributes com merge=union no sessoes.csv")
+    ga = ler(os.path.join(raiz, ".gitattributes"))
+    ok(all(tem_union(ga, x) for x in UNION), ".gitattributes com merge=union no sessoes.csv, IDEIAS.md e ERROS.md",
+       "rode /instalar-status → reparar")
+    ok(all(os.path.exists(L.caminho(raiz, t)) for t in ("ideia", "erro")), "IDEIAS.md e ERROS.md na raiz",
+       "rode `status-projeto listas`")
     e1, e2 = checar_gitignore(raiz)
     ok(not e1 and not e2, ".gitignore certo", "; ".join([f"{x} ignorado" for x in e1] + [f"{x} não ignorado" for x in e2]))
     ok(os.path.exists(os.path.join(raiz, c.GUIA)), f"guia {c.GUIA}")
@@ -1907,7 +1950,163 @@ def cmd_verificar(a):
     print("\nPara testar no claude.ai (no projeto com o repo conectado), mande:\n")
     print(f"  {frase}\n")
     print("Resposta certa: os mesmos itens que estão no STATUS.md do GitHub agora.")
+    print(f"\nPara testar a gravação (só IDEIAS.md e ERROS.md), mande:\n\n  {FRASE_GRAVACAO}\n")
+    print("Resposta certa: uma linha nova no fim do IDEIAS.md no GitHub (e nada no STATUS.md), ou \"NÃO GRAVEI\" com a "
+          "linha pronta para `status-projeto colar`. Depois descarte a ideia de teste: "
+          "`status-projeto ideia estado ID --para descartada`.")
     sys.exit(0 if all(b for b, _, _ in res) else 2)
+
+
+# =================================================================== ideias e erros (IDEIAS.md, ERROS.md)
+
+def _recusa(f):
+    def g(a):
+        try:
+            return f(a)
+        except L.Recusa as e:
+            sair(str(e), e.codigo)
+    return g
+
+
+def cmd_listas(a):
+    """Cria IDEIAS.md e ERROS.md (se faltarem) e o merge=union deles no .gitattributes."""
+    raiz = a.raiz
+    precisa_config(raiz)
+    criados = L.criar_arquivos(raiz)
+    print(("Criados: " + ", ".join(criados)) if criados else "IDEIAS.md e ERROS.md já existem; nada foi mexido.")
+    if garantir_union(raiz):
+        print(".gitattributes: merge=union no IDEIAS.md e no ERROS.md acrescentado.")
+
+
+def _det(a):
+    return {"tela": getattr(a, "tela", ""), "aparelho": getattr(a, "aparelho", ""), "versao": getattr(a, "versao", "")}
+
+
+def mostrar_ideias(raiz, cfg, todas, como_json):
+    if todas:
+        lst = L.itens_do_projeto(raiz, cfg, "ideia")
+    else:
+        lst = L.ideias_pendentes(raiz, cfg)
+    if como_json:
+        print(json.dumps([{k: v for k, v in x.items() if k not in ("repo_raiz", "linha", "ordem")} for x in lst],
+                         ensure_ascii=False, indent=2))
+        return
+    if not lst:
+        print("Nenhuma ideia pendente." if not todas else "Nenhuma ideia registrada.")
+        return
+    print(("Ideias (todas, com o estado)" if todas else f"Ideias pendentes ({len(lst)})") + " — IDEIAS.md")
+    for x in lst:
+        estado = f" · {x['estado']}" if todas else ""
+        aviso = ""
+        if x["estado"] == "pendente" and L.dias_desde(x["data"]) > L.DIAS_IDEIA_VELHA:
+            aviso = f"\n    ⚠ pendente há {L.dias_desde(x['data'])} dias: pergunte se mantém ou descarta"
+        print(f"- {x['id']} · {x['app']} · {c.data_br(x['criado'])}{estado} · {x['texto']}{aviso}")
+
+
+def mostrar_erros(raiz, cfg, todos, como_json):
+    lst = L.itens_do_projeto(raiz, cfg, "erro") if todos else L.erros_a_corrigir(raiz, cfg)
+    for x in lst:
+        x["falta"] = L.faltando(x)
+    if como_json:
+        print(json.dumps([{k: v for k, v in x.items() if k not in ("repo_raiz", "linha", "ordem")} for x in lst],
+                         ensure_ascii=False, indent=2))
+        return
+    if not lst:
+        print("Nenhum erro a corrigir." if not todos else "Nenhum erro registrado.")
+        return
+    grupos = collections.OrderedDict()
+    for x in sorted(lst, key=lambda x: (x["estado"] != "aberto", x["estado"], x["gravidade"] != "grave", x["criado"])):
+        grupos.setdefault(x["estado"], []).append(x)
+    ab = len(grupos.get("aberto", []))
+    print(f"Erros {'(todos)' if todos else 'a corrigir'} — ERROS.md: {ab} aberto(s)"
+          + "".join(f", {len(v)} {k}" for k, v in grupos.items() if k != "aberto"))
+    for estado, xs in grupos.items():
+        print(f"\n{estado}:")
+        for x in xs:
+            g = " · GRAVE" if x["gravidade"] == "grave" else ""
+            print(f"- {x['id']} · {x['app']} · {c.data_br(x['criado'])}{g} · {x['texto']}")
+            print(f"    tela: {x.get('tela', '?')} · aparelho: {x.get('aparelho', '?')} · versão: {x.get('versao', '?')}")
+            if x["falta"] and estado == "aberto":
+                print(f"    ⚠ incompleto: falta {', '.join(x['falta'])} — pergunte agora "
+                      f"(status-projeto erro completar {x['id']} --tela ... --aparelho ... --versao ...)")
+
+
+@_recusa
+def cmd_ideia(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    if a.acao == "anotar":
+        it, cam = L.anotar(raiz, cfg, "ideia", " ".join(a.texto), app=a.app)
+        print(f"Ideia anotada em {os.path.relpath(L.caminho(cam, 'ideia'), raiz)}: {it['id']} · {it['app']} · {it['texto']}")
+    elif a.acao == "estado":
+        if not a.texto or not a.para:
+            sair("Use: status-projeto ideia estado ID [ID...] --para 'virou FATIA_X' | descartada | pendente")
+        for i, antes, depois in L.mudar(raiz, cfg, "ideia", a.texto, estado=a.para):
+            print(f"{i}: {antes} → {depois}" + (" (mantida; conta 60 dias de novo)" if antes == depois == "pendente" else ""))
+    else:
+        mostrar_ideias(raiz, cfg, a.todas, a.json)
+
+
+@_recusa
+def cmd_erro(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    if a.acao == "anotar":
+        it, cam = L.anotar(raiz, cfg, "erro", " ".join(a.texto), app=a.app, grave=a.grave, det=_det(a),
+                           fora_do_teste=a.fora_do_teste)
+        print(f"Erro anotado em {os.path.relpath(L.caminho(cam, 'erro'), raiz)}: {it['id']} · {it['app']} · "
+              f"{it['gravidade']} · {it['texto']}")
+        falta = L.faltando(it)
+        if falta:
+            print(f"Ficou incompleto (falta {', '.join(falta)}): pergunte quando a lista de erros for pedida.")
+        if it["gravidade"] == "grave":
+            print(f"ERRO GRAVE: ofereça montar a fatia de correção agora, no topo do 📦: "
+                  f"status-projeto erro fatia --ids {it['id']} --gravar")
+    elif a.acao in ("estado", "completar"):
+        ids = list(a.texto or [])
+        if a.fatia:
+            ids += [x["id"] for x in L.itens_do_projeto(raiz, cfg, "erro") if x["estado"] == f"em {a.fatia}"]
+            if not ids:
+                sair(f"Nenhum erro em {a.fatia}.")
+        if not ids:
+            sair("Diga os ids (ou --fatia FATIA_CORRECOES_N).")
+        if a.acao == "estado" and not a.para:
+            sair("Use --para aberto | 'em FATIA_CORRECOES_N' | corrigido")
+        det = _det(a)
+        if a.acao == "completar" and not any(det.values()) and not a.grave and not a.normal:
+            sair("Use --tela, --aparelho, --versao (e/ou --grave / --normal).")
+        grav = "grave" if a.grave else "normal" if a.normal else None
+        for i, antes, depois in L.mudar(raiz, cfg, "erro", ids, estado=a.para or None, det=det, gravidade=grav):
+            it = L.achar(raiz, cfg, "erro", i)
+            falta = L.faltando(it)
+            print(f"{i}: {antes}" + (f" → {depois}" if antes != depois else "") +
+                  (f" · ainda falta {', '.join(falta)}" if falta else " · completo"))
+    elif a.acao == "fatia":
+        plano = L.montar_fatia(raiz, cfg, ids=a.ids, topo=a.topo, app=a.app, gravar=a.gravar)
+        if a.json:
+            print(json.dumps(plano, ensure_ascii=False, indent=2))
+            return
+        print(("Fatia de correção gravada" if a.gravar else "Fatia de correção (prévia; nada gravado — confirme e rode com --gravar)")
+              + f": {plano['arquivo']} [{plano['tamanho']}] com {len(plano['erros'])} erro(s), "
+              + ("no TOPO do 📦 (vira a próxima)" if plano["topo"] else "no fim do 📦"))
+        for ar, ids in plano["areas"].items():
+            print(f"  {ar}: {', '.join(ids)}")
+        if plano["incompletos"]:
+            print("  incompletos (pergunte os dados): " + "; ".join(f"{k} falta {', '.join(v)}"
+                                                                    for k, v in plano["incompletos"].items()))
+        print(f"  STATUS.md 📦: {plano['item_status']}")
+        if a.gravar:
+            print(f"  erros marcados: em {plano['fatia']}. Mostre o git diff (commit só com 'pode commitar').")
+    else:
+        mostrar_erros(raiz, cfg, a.todos, a.json)
+
+
+@_recusa
+def cmd_colar(a):
+    cfg = precisa_config(a.raiz)
+    tipo, cam, gravou = L.colar(a.raiz, cfg, " ".join(a.linha))
+    arq = os.path.relpath(L.caminho(cam, tipo), a.raiz)
+    print(f"Linha gravada no fim de {arq}." if gravou else f"Essa linha já está em {arq}; nada mudou.")
 
 
 # =================================================================== main
@@ -1988,6 +2187,33 @@ def main():
     x = s.add_parser("resumo", help="o que mudou nos últimos dias")
     x.add_argument("--dias", type=int, default=3)
     s.add_parser("ajuda", help="estado do projeto + guia")
+    s.add_parser("listas", help="cria IDEIAS.md e ERROS.md (se faltarem) com merge=union")
+    x = s.add_parser("ideia", help="ideias pendentes (IDEIAS.md): listar, anotar, estado")
+    x.add_argument("acao", nargs="?", default="listar", choices=["listar", "anotar", "estado"])
+    x.add_argument("texto", nargs="*", help="anotar: o texto; estado: os ids")
+    x.add_argument("--app", default="", help="app/repo do item (obrigatório em projeto com vários repos)")
+    x.add_argument("--para", default="", help="estado: 'virou FATIA_X' | descartada | pendente (mantém)")
+    x.add_argument("--todas", action="store_true", help="listar: também as que viraram fatia ou foram descartadas")
+    x.add_argument("--json", action="store_true")
+    x = s.add_parser("erro", help="erros a corrigir (ERROS.md): listar, anotar, completar, estado, fatia")
+    x.add_argument("acao", nargs="?", default="listar", choices=["listar", "anotar", "completar", "estado", "fatia"])
+    x.add_argument("texto", nargs="*", help="anotar: o texto; completar/estado/fatia: os ids")
+    x.add_argument("--app", default="")
+    x.add_argument("--grave", action="store_true")
+    x.add_argument("--normal", action="store_true", help="completar: volta a gravidade para normal")
+    x.add_argument("--tela", default="")
+    x.add_argument("--aparelho", default="")
+    x.add_argument("--versao", default="")
+    x.add_argument("--para", default="", help="estado: aberto | 'em FATIA_CORRECOES_N' | corrigido")
+    x.add_argument("--fatia", default="", help="estado/completar: todos os erros em FATIA_CORRECOES_N")
+    x.add_argument("--ids", nargs="+", default=None, help="fatia: só estes erros")
+    x.add_argument("--topo", action="store_true", help="fatia: no topo do 📦 (com erro grave, vai no topo sempre)")
+    x.add_argument("--gravar", action="store_true", help="fatia: grava (sem isso, só mostra a prévia)")
+    x.add_argument("--fora-do-teste", action="store_true", help="anotar com teste aberto: o erro não é da fatia em teste")
+    x.add_argument("--todos", action="store_true", help="listar: também os corrigidos e testados")
+    x.add_argument("--json", action="store_true")
+    x = s.add_parser("colar", help="grava em IDEIAS.md/ERROS.md uma linha pronta (a que o claude.ai mostra)")
+    x.add_argument("linha", nargs="+")
     s.add_parser("verificar", help="confere a integração")
 
     a = p.parse_args()

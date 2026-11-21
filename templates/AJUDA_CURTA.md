@@ -5,4 +5,6 @@ Ele pergunta seu nome, o valor da hora (padrão R$ 150) e a pasta das fatias, an
 CLAUDE.md e termina com o guia "ATENÇÃO — LEIA ANTES DE COMEÇAR".
 
 Comandos depois de instalado: /status-ajuda, /status-relatorio, /status-historico, /status-cronograma,
-/status-resumo, /status-valor, /verificar-integracao.
+/status-resumo, /status-ideias, /status-erros, /status-valor, /verificar-integracao.
+Frases: "anota a ideia: ...", "anota o erro: ...", "quais ideias pendentes?", "quais erros a corrigir?",
+"monta a fatia de correção".
