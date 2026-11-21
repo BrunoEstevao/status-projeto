@@ -7,6 +7,7 @@ Todos os comandos rodam na raiz do repositório principal da pasta atual (ou --r
 import argparse
 import collections
 import csv
+import hashlib
 import json
 import os
 import re
@@ -290,8 +291,13 @@ RE_MOVER = re.compile(r"\b(git\s+mv|mv|mov[ae]r?|move[rs]?|arquiv[ae]r?|archive|
 RE_APAGAR = re.compile(r"\b(apag[ae]r?|apague|delet[ae]r?|delete|exclu[ia]r?|exclua|git\s+rm|rm\s+-|remov[ae]r?)\b", re.I)
 RE_OBJ_FATIA = re.compile(r"\b(fatia|slice|este arquivo|esse arquivo|this file|relat[óo]rio|report)", re.I)
 RE_ARQUIVO_DESTINO = re.compile(r"(execut|conclu|done|archiv|arquiv|finaliz|antig|old|histor|feit)", re.I)
-RE_GITIGNORE = re.compile(r"gitignore|n[ãa]o\s+(commit|versione|versionar|suba|subir|envie)|git\s+rm\s+--cached|"
-                          r"don.?t\s+commit|untrack", re.I)
+# só instrução de não versionar ("não commite o X"); "alteração não commitada" descreve o estado da árvore
+RE_GITIGNORE = re.compile(r"gitignore|git\s+rm\s+--cached|untrack|don.?t\s+commit|\bn[ãa]o\s+(?:fa[çc]a\s+commit|"
+                          r"commite|commitar|versione|versionar|suba|subir|envie|enviar|mande)\b", re.I)
+# ...e o que concorda com a regra: "confira que X não está no .gitignore", "tire X do .gitignore"
+RE_GITIGNORE_OK = re.compile(r"(n[ãa]o\s+(?:est[áa]|esteja|fique|pode\s+estar|deve\s+estar|seja)|tir[ae]r?|tire|"
+                             r"remov[ae]r?|remova|fora)\b.*?gitignore|gitignore.*?\bn[ãa]o\s+(?:ignor|deve)", re.I)
+RE_ALVO_STATUS = re.compile(r"(STATUS\.md|CLAUDE\.md|docs/tempo|pasta\s+d[ae]s?\s+fatias|fatias/|relat[óo]rios?\b)", re.I)
 RE_GERAR = re.compile(r"\b(ger[ae]r?|gere|cri[ae]r?|salv[ae]r?|escrev[ae]r?|grav[ae]r?|generate|write|save|create|"
                       r"coloc[ae]r?|ponha)\b", re.I)
 RE_RELAT = re.compile(r"relat[óo]rio|report", re.I)
@@ -347,13 +353,13 @@ def contradicoes_linha(linha, cfg):
             achou.append(("arquivar", f"fatia concluída vai para `{pe}/` (com o relatório dela)",
                           f"trocar `{destinos[0]}` por `{pe}/`"))
     # 2. .gitignore
-    if RE_GITIGNORE.search(linha):
+    if RE_GITIGNORE.search(linha) and not RE_GITIGNORE_OK.search(linha):
         protegidos = ["STATUS.md", "CLAUDE.md", "docs/tempo", c.GUIA, ".claude-status/config.json", ".claude-status",
                       ".gitattributes", pf, pe]
         alvo = [x for x in caminhos if any(dentro(x, pp) or dentro(pp, x.rstrip("/*")) or
                                             os.path.basename(x.rstrip("/")) == os.path.basename(pp) for pp in protegidos)]
-        if not caminhos and re.search(r"\b(STATUS\.md|CLAUDE\.md|fatias?|relat[óo]rios?|docs/tempo)\b", linha, re.I):
-            alvo = ["(arquivos do status)"]
+        if not alvo and RE_ALVO_STATUS.search(linha):
+            alvo = [RE_ALVO_STATUS.search(linha).group(1)]
         if alvo:
             achou.append(("gitignore", "STATUS.md, CLAUDE.md, docs/tempo/, o guia, o config e as pastas de fatias "
                                        "vão para o git (o claude.ai lê pelo GitHub)",
@@ -375,11 +381,19 @@ def contradicoes_linha(linha, cfg):
     return achou
 
 
+def id_contradicao(arquivo, tipo, linha):
+    """Id estável do apontamento: não depende do número da linha nem da pasta (sobrevive a mover a fatia)."""
+    chave = f"{os.path.basename(arquivo)}|{tipo}|{' '.join(linha.split()).lower()}"
+    return hashlib.sha1(chave.encode("utf-8")).hexdigest()[:8]
+
+
 def contradicoes_fatias(raiz, cfg):
+    """(achados, sem_arquivo, ignorados): os marcados como ignorados no config não entram em achados."""
     fases, _ = c.ler_status_arquivo(raiz)
     if fases is None:
-        return [], []
-    achados, sem_arquivo = [], []
+        return [], [], []
+    ign = {x["id"] for x in cfg.get("contradicoes_ignoradas", [])}
+    achados, sem_arquivo, ignorados = [], [], []
     for it in fases["📦"]:
         arq = arquivo_da_fatia(raiz, cfg, it)
         if not arq:
@@ -387,16 +401,42 @@ def contradicoes_fatias(raiz, cfg):
             continue
         for i, linha in enumerate(ler(os.path.join(raiz, arq)).splitlines(), 1):
             for tipo, regra, sug in contradicoes_linha(linha, cfg):
-                achados.append({"fatia": it["nome"], "arquivo": arq, "linha": i, "tipo": tipo,
-                                "trecho": linha.strip()[:160], "regra": regra, "sugestao": sug})
-    return achados, sem_arquivo
+                x = {"id": id_contradicao(arq, tipo, linha), "fatia": it["nome"], "arquivo": arq, "linha": i,
+                     "tipo": tipo, "trecho": linha.strip()[:160], "regra": regra, "sugestao": sug}
+                (ignorados if x["id"] in ign else achados).append(x)
+    return achados, sem_arquivo, ignorados
 
 
 def cmd_contradicoes(a):
     cfg = precisa_config(a.raiz)
-    achados, sem_arquivo = contradicoes_fatias(a.raiz, cfg)
+    achados, sem_arquivo, ignorados = contradicoes_fatias(a.raiz, cfg)
+    if a.ignorar or a.desfazer:
+        lista = cfg.setdefault("contradicoes_ignoradas", [])
+        por_id = {x["id"]: x for x in achados + ignorados}
+        for i in a.ignorar or []:
+            if i not in por_id:
+                sair(f"Apontamento {i} não encontrado (rode `status-projeto contradicoes` para ver os ids).")
+            if not any(x["id"] == i for x in lista):
+                x = por_id[i]
+                lista.append({"id": i, "arquivo": x["arquivo"], "tipo": x["tipo"], "trecho": x["trecho"],
+                              "em": c.agora_s(), "obs": a.obs or ""})
+            print(f"Ignorado: {i} ({por_id[i]['arquivo']}:{por_id[i]['linha']}) — não volta a aparecer.")
+        for i in a.desfazer or []:
+            if not any(x["id"] == i for x in lista):
+                sair(f"{i} não está entre os ignorados.")
+            lista[:] = [x for x in lista if x["id"] != i]
+            print(f"Voltou a valer: {i}.")
+        c.gravar_config(a.raiz, cfg)
+        return
+    if a.ignoradas:
+        lista = cfg.get("contradicoes_ignoradas", [])
+        print("Apontamentos marcados como ignorados:" if lista else "Nenhum apontamento ignorado.")
+        for x in lista:
+            print(f"- {x['id']} {x['arquivo']} [{x['tipo']}] {x['trecho']}" + (f" — {x['obs']}" if x.get("obs") else ""))
+        return
     if a.json:
-        print(json.dumps({"contradicoes": achados, "sem_arquivo": sem_arquivo}, ensure_ascii=False, indent=2))
+        print(json.dumps({"contradicoes": achados, "sem_arquivo": sem_arquivo, "ignorados": len(ignorados)},
+                         ensure_ascii=False, indent=2))
         return
     nomes = {"arquivar": "onde arquivar", "gitignore": ".gitignore", "relatorio": "onde gerar o relatório",
              "status": "status fora do STATUS.md"}
@@ -405,9 +445,13 @@ def cmd_contradicoes(a):
     else:
         print("Instruções nas fatias em 📦 que contradizem as regras do plugin (nada foi alterado):")
         for x in achados:
-            print(f"- {x['arquivo']}:{x['linha']} [{nomes[x['tipo']]}] {x['trecho']}")
+            print(f"- {x['id']} {x['arquivo']}:{x['linha']} [{nomes[x['tipo']]}] {x['trecho']}")
             print(f"    regra: {x['regra']}")
             print(f"    correção: {x['sugestao']}")
+    if ignorados:
+        print(f"({len(ignorados)} apontamento(s) marcado(s) como ignorado(s) não aparecem; veja com --ignoradas.)")
+    if achados:
+        print("Falso positivo? `status-projeto contradicoes --ignorar ID [--obs motivo]` (fica no config).")
     if sem_arquivo:
         print("Itens de 📦 sem arquivo de fatia encontrado (não conferidos): " + ", ".join(sem_arquivo))
     if achados:
@@ -1358,6 +1402,10 @@ def main():
     x.add_argument("--json", action="store_true")
     x = s.add_parser("contradicoes", help="instruções das fatias em 📦 que contradizem as regras do plugin")
     x.add_argument("--json", action="store_true")
+    x.add_argument("--ignorar", action="append", metavar="ID", help="marca o apontamento como ignorado (no config)")
+    x.add_argument("--desfazer", action="append", metavar="ID", help="volta a valer um apontamento ignorado")
+    x.add_argument("--obs", default="", help="motivo (com --ignorar)")
+    x.add_argument("--ignoradas", action="store_true", help="lista os ignorados")
     s.add_parser("estimar", help="estimativa de horas pelo git (uma vez só)")
     x = s.add_parser("claude-md", help="grava o bloco de regras no CLAUDE.md")
     x.add_argument("--mesmo-assim", action="store_true")

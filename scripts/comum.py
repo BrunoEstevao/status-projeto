@@ -137,6 +137,7 @@ def config_padrao():
         "ocioso_min": 30,
         "horas_dia": 8,
         "autonomo_processos": [],
+        "contradicoes_ignoradas": [],
         "etapas": {},
     }
 

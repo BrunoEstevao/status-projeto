@@ -5,6 +5,20 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.2.0] — 2026-11-20
+### Adicionado
+- `status-projeto contradicoes --ignorar ID [--obs motivo]`: marca um apontamento como falso positivo. Fica em
+  `contradicoes_ignoradas` no config (campo novo, padrão vazio) e não volta nas próximas rodadas. O id não depende do
+  número da linha nem da pasta da fatia; se o texto da linha mudar, o apontamento volta. `--ignoradas` lista os ignorados e
+  `--desfazer ID` faz um voltar a valer. O `/instalar-status` oferece a opção "Marcar como ignorado".
+### Corrigido
+- `contradicoes` marcava como `.gitignore` instruções de deixar a árvore limpa ("se houver alteração não commitada,
+  pare e peça para commitar"). Agora só conta instrução de não versionar ("não commite o X") com um arquivo do status
+  citado, e não marca o que concorda com a regra ("confira que X não está no .gitignore", "tire X do .gitignore").
+- Guia: as instruções do claude.ai separavam as fases com ` | `, e a linha "🧪 Aguardando teste" aparecia duplicada
+  na tabela de fases quando o guia era exibido em markdown (o template estava certo). As fases agora vêm uma por
+  linha, e as instruções e a frase de teste ficam em bloco de código.
+
 ## [1.1.0] — 2026-11-20
 ### Adicionado
 - `status-projeto contradicoes`: na instalação em projeto existente (e no Atualizar), lê o arquivo de cada fatia em 📦

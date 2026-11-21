@@ -266,6 +266,38 @@ checa "fatia que segue as regras e fatia fora de 📦 não aparecem" "! grep -q 
 checa "sai com código 3 e não altera as fatias" "[ $rc = 3 ] && grep -q 'apague' $F/FATIA_SOLTA.md"
 printf 'Ao concluir, git mv para fatias_executadas/.\n' > "$F/FATIA_SOLTA.md"; printf 'ok\n' > "$F/fatias/FATIA_RUIM.md"
 checa "depois de corrigidas, código 0" "$SP --raiz $F contradicoes > /dev/null"
+cat > "$F/fatias/FATIA_LIMPA.md" <<'EOF'
+Rode `git status`. Se houver QUALQUER
+   alteração não commitada, **PARE, NÃO execute a fatia** e avise o T para ele commitar
+Confira que o STATUS.md não está no .gitignore.
+Tire docs/tempo/ do .gitignore se estiver lá.
+EOF
+checa "'alteração não commitada' e 'não está no .gitignore' não são contradição" "$SP --raiz $F contradicoes > /dev/null"
+printf 'Não commite o STATUS.md.\n' > "$F/FATIA_SOLTA.md"
+ID="$($SP --raiz $F contradicoes --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["contradicoes"][0]["id"])')"
+$SP --raiz "$F" contradicoes --ignorar "$ID" --obs "falso positivo" > /dev/null
+checa "apontamento ignorado fica no config e não volta" "grep -q '\"$ID\"' $F/.claude-status/config.json && $SP --raiz $F contradicoes | grep -q '1 apontamento'"
+printf '# título novo\nNão commite o STATUS.md.\n' > "$F/FATIA_SOLTA.md"
+checa "ignorado continua ignorado se a linha só mudou de número" "$SP --raiz $F contradicoes > /dev/null"
+$SP --raiz "$F" contradicoes --ignorar "$ID" > /dev/null
+checa "ignorar de novo não duplica" "[ \$(grep -c '\"$ID\"' $F/.claude-status/config.json) = 1 ]"
+$SP --raiz "$F" contradicoes --desfazer "$ID" > /dev/null
+checa "--desfazer faz o apontamento voltar" "! $SP --raiz $F contradicoes > /dev/null"
+checa "id inexistente é recusado" "! $SP --raiz $F contradicoes --ignorar ffffffff 2>/dev/null"
+
+echo "== 8. Guia: cada fase uma vez só na tabela; instruções do claude.ai em bloco de código"
+checa "guia impresso: nenhuma linha fora de bloco de código repete a fase" "python3 - $V/docs/COMO_USAR_STATUS.md <<'PY'
+import sys
+dentro, fora = False, []
+for l in open(sys.argv[1], encoding='utf-8'):
+    if l.strip().startswith('\`\`\`'):
+        dentro = not dentro
+        continue
+    if not dentro:
+        fora.append(l)
+sys.exit(0 if sum('Aguardando teste' in l for l in fora) == 1 and not dentro else 1)
+PY"
+checa "instruções do claude.ai sem ' | ' (viravam linha de tabela)" "! grep -q ' | 🧪' $V/docs/COMO_USAR_STATUS.md"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

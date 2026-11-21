@@ -82,7 +82,10 @@ e **status fora do STATUS.md** (TODO.md, PROGRESSO.md...).
 - Código 0 → diga em uma linha que nenhuma fatia contradiz as regras (e cite as `sem arquivo`, se houver).
 - Código 3 → mostre a lista **inteira** (arquivo:linha, trecho, regra, correção). A detecção é por padrão de texto:
   leia cada trecho no contexto da fatia e descarte (dizendo que descartou) o que não for instrução de verdade.
-  Pergunte (AskUserQuestion): **Corrigir todas** · **Escolher quais** · **Não corrigir agora**.
+  Pergunte (AskUserQuestion): **Corrigir todas** · **Escolher quais** · **Marcar como ignorado (falso positivo)** ·
+  **Não corrigir agora**. Falso positivo (seu ou do usuário) → `status-projeto contradicoes --ignorar ID --obs "motivo"`
+  (o id aparece no começo de cada apontamento; fica em `contradicoes_ignoradas` no config e não volta nas próximas
+  rodadas, enquanto o texto da linha não mudar). `--ignoradas` lista; `--desfazer ID` faz voltar a valer.
   Só com o sim, edite **apenas aquelas linhas** de cada fatia para seguir a regra (sem reescrever o resto),
   mostre o `git diff` das fatias e rode `status-projeto contradicoes` de novo para confirmar. Não faça commit.
 

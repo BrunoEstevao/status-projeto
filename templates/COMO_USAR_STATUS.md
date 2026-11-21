@@ -64,11 +64,15 @@ Os nomes completos são `/status-projeto:<comando>` (use se outro plugin tiver u
 2. **Conferir.** Na mesma tela, clique em "Verificar status do repositório".
 3. **Instruções do projeto no claude.ai.** Abra o projeto → painel da direita → Instruções → Adicionar → cole este texto:
 
+    ```text
 {{instrucoes_claude_ai}}
+    ```
 
 4. **Frase de teste.** Depois de commit e push do `STATUS.md`, numa sessão do projeto no claude.ai, mande:
 
+    ```text
     {{frase_teste}}
+    ```
 
    A resposta tem que bater com o `STATUS.md` do GitHub. `/verificar-integracao` confere o lado do repo.
 5. **Revise os itens com (?)** — o que a instalação não conseguiu comprovar pelo código e pelo git:
