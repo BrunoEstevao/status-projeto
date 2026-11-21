@@ -336,7 +336,7 @@ def ler_sessoes(caminho):
 def gravar_sessoes(caminho, linhas):
     tmp = caminho + ".tmp"
     with open(tmp, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=CAMPOS, extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=CAMPOS, extrasaction="ignore", lineterminator="\n")  # sempre LF
         w.writeheader()
         for l in linhas:
             w.writerow({k: l.get(k, "") for k in CAMPOS})

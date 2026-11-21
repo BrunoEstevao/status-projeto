@@ -142,6 +142,8 @@ projetos o plugin não grava nada.
   tempo medido.
 - **Valor da hora com histórico:** cada sessão usa o valor que valia quando ela começou. Mudar o valor
   (`/status-valor`) acrescenta uma linha e não muda nada do que já foi calculado.
+- **Custo sem arredondar:** o custo de cada sessão estimada é o da coluna `custo` do CSV, calculado com as horas
+  exatas, então o relatório bate com a soma do arquivo. Os CSVs são gravados com LF.
 
 ## Projeto com vários repositórios
 

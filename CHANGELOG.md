@@ -5,6 +5,15 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.6.1] — 2026-11-21
+### Corrigido
+- Custo da estimativa: o relatório multiplicava as horas arredondadas (2 casas) pelo valor. Agora usa a coluna
+  `custo` do CSV, calculada com as horas sem arredondar. No zapai, o subtotal estimado passa de R$ 36.601,50 para
+  R$ 36.607,48, a soma do arquivo. A soma sem sobreposição usa o mesmo valor por hora de cada sessão.
+- CSVs gravados sempre com LF (`lineterminator="\n"`): `sessoes.csv` (hooks) e `estimativa_git.csv`. Um
+  `sessoes.csv` antigo com CRLF passa para LF na próxima gravação dos hooks. No `taxa.csv` do projeto, a linha nova
+  segue a terminação que o arquivo já usa, porque as linhas antigas não são mexidas.
+
 ## [1.6.0] — 2026-11-21
 ### Adicionado
 - Projeto que já tem `docs/tempo/taxa.csv`: o valor da hora vem dele, que passa a ser a fonte; o config guarda uma

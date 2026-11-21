@@ -767,7 +767,7 @@ def cmd_estimar(a):
     linhas, n = estimar_git(raiz, corte, c.taxas(cfg), cfg.get("autores_git"))
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=c.CAMPOS_EST)
+        w = csv.DictWriter(f, fieldnames=c.CAMPOS_EST, lineterminator="\n")  # sempre LF
         w.writeheader()
         w.writerows(linhas)
     h = sum(float(l["horas"]) for l in linhas)
@@ -1139,16 +1139,28 @@ def cmd_repos(a):
 # =================================================================== dados de horas
 
 class Bloco:
-    __slots__ = ("repo", "fonte", "tipo", "fatia", "ini", "fim", "h", "taxa")
+    __slots__ = ("repo", "fonte", "tipo", "fatia", "ini", "fim", "h", "taxa", "custo_fixo")
 
     def __init__(self, repo, fonte, tipo, fatia, ini, fim, taxa):
         self.repo, self.fonte, self.tipo, self.fatia = repo, fonte, tipo, fatia
         self.ini, self.fim, self.taxa = ini, fim, taxa
         self.h = max(0.0, (fim - ini).total_seconds() / 3600)
+        self.custo_fixo = None  # custo gravado no CSV (calculado com as horas sem arredondar): vale ele
 
     @property
     def custo(self):
-        return self.h * self.taxa
+        return self.custo_fixo if self.custo_fixo is not None else self.h * self.taxa
+
+    @property
+    def taxa_efetiva(self):
+        return self.custo / self.h if self.h > 0 else self.taxa
+
+
+def custo_da_linha(r):
+    try:
+        return float(str(r.get("custo") or "").replace(",", ".")) if str(r.get("custo") or "").strip() else None
+    except ValueError:
+        return None
 
 
 def blocos_do_repo(nome, cam, cfg_principal):
@@ -1179,6 +1191,7 @@ def blocos_do_repo(nome, cam, cfg_principal):
                       float(r.get("valor_hora") or c.taxa_em(txs, ini)))
             if r.get("horas"):
                 b.h = float(r["horas"])
+            b.custo_fixo = custo_da_linha(r)
             blocos.append(b)
             info["n_commits_est"] += int(r.get("commits") or 0)
         info["corte"] = c.para_dt(cfg.get("instalado_em")) if c.ler_config(cam) else None
@@ -1191,6 +1204,7 @@ def blocos_do_repo(nome, cam, cfg_principal):
             b = Bloco(nome, "git", "interativo", r["fatia"], c.para_dt(r["inicio"]), c.para_dt(r["fim"]),
                       float(r["valor_hora"]))
             b.h = float(r["horas"])
+            b.custo_fixo = custo_da_linha(r)
             blocos.append(b)
     return blocos, info
 
@@ -1211,10 +1225,10 @@ def coletar(raiz, cfg, todos=False, extras=None):
 
 def uniao(blocos, txs):
     """Horas e custo de relógio, sem contar duas vezes o tempo simultâneo."""
-    ivs = sorted((b.ini, b.ini + timedelta(hours=b.h)) for b in blocos if b.h > 0)
+    ivs = sorted((b.ini, b.ini + timedelta(hours=b.h), b.taxa_efetiva) for b in blocos if b.h > 0)
     h = custo = 0.0
     fim_ate = None
-    for a, b in ivs:
+    for a, b, taxa in ivs:
         if fim_ate is None or a >= fim_ate:
             seg_ini, seg_fim = a, b
         elif b > fim_ate:
@@ -1223,7 +1237,7 @@ def uniao(blocos, txs):
             continue
         dh = (seg_fim - seg_ini).total_seconds() / 3600
         h += dh
-        custo += dh * c.taxa_em(txs, seg_ini)
+        custo += dh * taxa  # valor por hora do próprio bloco (o do CSV, quando gravado)
         fim_ate = seg_fim if fim_ate is None else max(fim_ate, seg_fim)
     return h, custo
 

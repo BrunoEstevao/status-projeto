@@ -401,6 +401,30 @@ printf 'vigente_desde,valor_hora,observacao\n2026-10-01,150.00,x\n' > "$Y/docs/t
 ( cd "$Y" && $SP init --usuario T > /dev/null )
 checa "init sem --valor aproveita o taxa.csv sem mexer" "[ \"\$(sha256sum < $Y/docs/tempo/taxa.csv)\" = \"$HY\" ] && grep -q '\"valor\": 150.0' $Y/.claude-status/config.json"
 
+echo "== 13. Custo com as horas sem arredondar e CSVs com LF"
+# 6,4747 h × 150 = 971,21 no arquivo; com as horas arredondadas (6,47) daria 970,50
+checa "relatório usa a coluna custo da estimativa (R\$ 971,21, não 970,50)" "$SP --raiz $Z relatorio | grep 'subtotal estimado' | grep -q '971,21'"
+checa "estimativa nova grava custo das horas sem arredondar" "python3 - $H/docs/tempo/estimativa_git.csv <<'PY'
+import csv, sys
+from datetime import datetime
+for r in csv.DictReader(open(sys.argv[1])):
+    h = (datetime.strptime(r['fim'], '%Y-%m-%d %H:%M') - datetime.strptime(r['inicio'], '%Y-%m-%d %H:%M')).total_seconds() / 3600
+    assert abs(float(r['custo']) - h * float(r['valor_hora'])) < 0.006, r
+PY"
+checa "relatório soma o custo do arquivo" "python3 - $H <<'PY'
+import csv, subprocess, sys
+r = list(csv.DictReader(open(sys.argv[1] + '/docs/tempo/estimativa_git.csv')))
+alvo = f\"{sum(float(x['custo']) for x in r):,.2f}\".replace(',', 'X').replace('.', ',').replace('X', '.')
+out = subprocess.run(['python3', '$PLUGIN/scripts/status_projeto.py', '--raiz', sys.argv[1], 'relatorio'], capture_output=True, text=True).stdout
+sys.exit(0 if any('subtotal estimado' in l and alvo in l for l in out.splitlines()) else 1)
+PY"
+L="$BASE/lf"; rm -rf "$L"; mkdir -p "$L"; git -C "$L" init -q -b main; ( cd "$L" && $SP init --usuario T > /dev/null )
+mkdir -p "$L/docs/tempo"; printf 'inicio,fim,repo,fatia,tipo,sessao,estado\r\n2026-11-01 10:00:00,2026-11-01 11:00:00,lf,x,interativo,velha,fechada\r\n' > "$L/docs/tempo/sessoes.csv"
+evento "$L" "ffffffff-0000-0000-0000-000000000009" SessionStart > /dev/null
+evento "$L" "ffffffff-0000-0000-0000-000000000009" SessionEnd > /dev/null
+checa "hooks regravam o sessoes.csv com LF (sem CRLF)" "! grep -q \$'\\r' $L/docs/tempo/sessoes.csv && grep -q ',velha,fechada' $L/docs/tempo/sessoes.csv"
+checa "estimativa e sessões do repo com histórico sem CRLF" "! grep -q \$'\\r' $H/docs/tempo/estimativa_git.csv $H/docs/tempo/sessoes.csv"
+
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"
 exit $FALHAS
