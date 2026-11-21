@@ -311,7 +311,7 @@ json.dump(d, open(p, "w"))
 PY
 }
 for cmd in relatorio "relatorio --todos" historico cronograma resumo ajuda contradicoes "contradicoes --json" \
-           "contradicoes --ignoradas" guia estado espalhado github verificar reparar; do
+           "contradicoes --ignoradas" guia estado espalhado fatias-soltas github verificar reparar; do
   velho; F1="$(foto)"; $SP --raiz "$H" $cmd > /dev/null 2>&1; F2="$(foto)"
   checa "$cmd não grava" '[ "$F1" = "$F2" ]'
 done
@@ -355,6 +355,29 @@ A1="$(sha256sum < $J/STATUS.md)"; $SP --raiz "$J" status-md --marcar > /dev/null
 checa "ajustar não sobra nada fora do padrão; rodar de novo não muda" "[ \"\$(sha256sum < $J/STATUS.md)\" = \"$A1\" ] && $SP --raiz $J estado | grep -q '\"fases_extras\": \[\]'"
 checa "título inexistente é recusado" "! $SP --raiz $J status-md --ajustar 'Nada=🌐' 2>/dev/null"
 checa "guia e README sem '/plugin update' como comando de atualizar" "! grep -q '^/plugin update' $PLUGIN/README.md $V/docs/COMO_USAR_STATUS.md && grep -q 'claude plugin update status-projeto@status-projeto' $V/docs/COMO_USAR_STATUS.md"
+
+echo "== 11. Status espalhado e fatias fora da pasta: também fora do git e ignorados"
+K="$BASE/soltas"; rm -rf "$K"; mkdir -p "$K/fatias" "$K/docs" "$K/node_modules/pacote"; git -C "$K" init -q -b main
+( cd "$K" && $SP init --usuario T --valor 150 > /dev/null )
+printf '## 🌐 Codando\n## 📦 Fatia pronta, não iniciada\n- [P] `fatias/FATIA_DENTRO.md` — ok (desde ?)\n## 🧪 Aguardando teste\n- [M] FATIA_CITADA — na raiz (desde ?)\n## ⏸️ Bloqueado (externo)\n## ✅ Concluído\n' > "$K/STATUS.md"
+echo x > "$K/fatias/FATIA_DENTRO.md"; echo x > "$K/FATIA_CITADA.md"; echo x > "$K/README.md"
+echo "# metodologia" > "$K/metodologia.md"; echo "# todo" > "$K/node_modules/pacote/TODO.md"
+git -C "$K" add -A; git -C "$K" commit -q -m "inicio"
+echo x > "$K/FATIA_V3_API_2_CARTAO.md"                       # fora do git
+echo "- [ ] a" > "$K/MINERADOR-STATUS.md"                    # fora do git, STATUS no fim do nome
+echo "- [ ] a" > "$K/ESTADO_ATUAL.md"; echo "ESTADO_ATUAL.md" >> "$K/.git/info/exclude"   # ignorado
+echo "x" > "$K/docs/V3-ANDAMENTO.md"
+for n in 1 2 3; do echo x > "$K/docs/2026-11-0${n}_FATIA_N$n.md"; done   # pasta-arquivo de fatias antigas
+
+ESP="$($SP --raiz $K espalhado)"
+checa "espalhado acha ESTADO_ATUAL (ignorado) e MINERADOR-STATUS (fora do git)" "grep -q 'ESTADO_ATUAL.md \[ignorado\]' <<<\"\$ESP\" && grep -q 'MINERADOR-STATUS.md \[fora do git\]' <<<\"\$ESP\""
+checa "espalhado acha ANDAMENTO no nome e não confunde metodologia com TODO" "grep -q 'docs/V3-ANDAMENTO.md' <<<\"\$ESP\" && ! grep -q 'metodologia' <<<\"\$ESP\""
+checa "espalhado não entra em node_modules" "! grep -q node_modules <<<\"\$ESP\""
+SOL="$($SP --raiz $K fatias-soltas --json)"
+sol() { python3 -c "import json,sys;d={x['arquivo']:x for x in json.load(sys.stdin)};print(' '.join(f\"{k}:{v['situacao']}:{int(v['citada_no_status'])}:{v['grupo']}\" for k,v in sorted(d.items())))" <<<"$SOL"; }
+checa "fatias-soltas: raiz fora do git, citada no STATUS, docs/ em grupo, fatias/ fora ($(sol))" "[ \"\$(sol)\" = 'FATIA_CITADA.md:versionado:1: FATIA_V3_API_2_CARTAO.md:fora do git:0: docs/2026-11-01_FATIA_N1.md:fora do git:0:docs docs/2026-11-02_FATIA_N2.md:fora do git:0:docs docs/2026-11-03_FATIA_N3.md:fora do git:0:docs' ]"
+checa "estado traz fatias_fora_da_pasta" "$SP --raiz $K estado | grep -q 'FATIA_V3_API_2_CARTAO'"
+checa "CLAUDE.md não conta como status espalhado por causa do bloco do plugin" "! $SP --raiz $V espalhado | grep -q '^- CLAUDE.md'"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"

@@ -28,7 +28,8 @@ Argumentos recebidos: `$ARGUMENTS` (podem trazer `usuario=`, `valor=`, `pasta=`;
 
 ## Passo 0 — diagnóstico
 Rode `status-projeto estado` e leia o JSON (instalado, etapas_feitas, etapas_pendentes, precisa_atualizar, git,
-projeto_novo, status_md, claude_md, pastas_fatias_detectadas, fatias_soltas_na_raiz, hooks_manuais_antigos).
+projeto_novo, status_md, claude_md, pastas_fatias_detectadas, fatias_soltas_na_raiz, fatias_fora_da_pasta,
+hooks_manuais_antigos).
 Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `git init`) e pare.
 
 ## Passo 1 — já instalado?
@@ -46,7 +47,7 @@ Se `git.repo_git` for false, avise que precisa ser um repositório git (sugira `
   - Atualizar: `status-projeto atualizar` (migra o config, regrava só o bloco do CLAUDE.md e o guia), depois
     `status-projeto reparar` e trate o que aparecer. Mostre o que mudou do CHANGELOG do plugin
     (`${CLAUDE_PLUGIN_ROOT}/CHANGELOG.md`) entre `versao_plugin_instalada` e `versao_plugin`.
-    Rode também o passo 3b (contradições nas fatias em 📦).
+    Rode também os passos 3a (fatias fora da pasta) e 3b (contradições nas fatias em 📦).
 - `instalado: true` mas incompleto → diga "a instalação anterior parou; continuo de onde parou" e faça **só as etapas
   de `etapas_pendentes`**, na ordem abaixo. Não pergunte de novo o que já está no config.
 - `instalado: false` → instalação nova, a partir do passo 2.
@@ -69,7 +70,9 @@ Depois: `status-projeto init --usuario "<nome>" --valor <valor> --pasta-fatias <
 
 ## Passo 3 — etapa `status_md`
 **Antes de mexer em qualquer coisa**, rode `status-projeto espalhado` e mostre a lista de arquivos com status
-espalhado (TODO, PROGRESSO, checklists, "concluído"...). Não apague nada: só informe que, pela regra, o status passa
+espalhado: pelo nome (ESTADO, STATUS, PROGRESSO, ANDAMENTO, TODO, PENDENCIAS... em qualquer posição do nome, ex.:
+`ESTADO_ATUAL.md`, `MINERADOR-STATUS.md`) e pelo conteúdo (checklists, "concluído"...). A lista inclui arquivos
+**fora do git** e **ignorados** (marcados assim): diga que esses não chegam ao GitHub, então o claude.ai não os vê. Não apague nada: só informe que, pela regra, o status passa
 a morar só no STATUS.md, e pergunte (AskUserQuestion) o que fazer com esses arquivos — não faça agora sem ordem:
 **Tirar o status desses arquivos depois (Recomendado)** — motivo: "duas fontes de status ficam diferentes com o
 tempo, e o claude.ai só lê o STATUS.md" · **Deixar como está** — descrição: "escolha se outras pessoas ou
@@ -106,6 +109,26 @@ ferramentas usam esses arquivos". Se algum deles for de fatia, lembre que o pass
     `- [M] FATIA_NOME — o que é (desde 05/10)` ou `` - [P] `fatias/FATIA_NOME.md` — o que é (desde ?) ``.
   - Mostre o STATUS.md ao usuário e grave. Depois `status-projeto status-md --marcar` (ele mostra avisos de formato:
     corrija o que for seu).
+
+## Passo 3a — fatias fora da pasta (sempre: projeto existente, STATUS.md novo ou já existente, ajuste, Atualizar)
+Depois do STATUS.md (escrito, completado ou ajustado), rode `status-projeto fatias-soltas` (ou leia
+`fatias_fora_da_pasta` do `estado`). Ele acha todo `FATIA_*.md` fora da pasta das fatias e da pasta das executadas —
+na raiz, em `docs/` ou com prefixo de data (`2026-11-14_FATIA_X.md`) —, **versionado, fora do git ou ignorado**,
+e diz se o STATUS.md já cita a fatia. **Nenhuma fatia fica de fora sem o usuário decidir.**
+- **Arquivos soltos** (sem `grupo`): para cada um que **não** está no STATUS.md, levante a fase pelas evidências (git
+  log do arquivo e de commits com o nome da fatia, arquivo `*-RESULT`/relatório com o mesmo nome, código citado na
+  fatia que já existe) e pergunte a fase de **cada um** (AskUserQuestion, até 4 perguntas por chamada; opções 🌐 · 📦 ·
+  🧪 · ✅, e "Other" para ⏸️ ou "deixar de fora"). Se as evidências apontam uma fase, ela vem primeiro com
+  "(Recomendado)" e a evidência como motivo; sem evidência, nenhuma recomendada e diga que depende de o usuário
+  saber em que pé está. Os que **já estão** no STATUS.md: só proponha mover para a pasta certa.
+  Com a resposta: `git mv` (ou `mv`, se estiver fora do git) para `<pasta_fatias>/` — ou `<pasta_executadas>/` se
+  for ✅ —, registre o item na fase com `[P]/[M]/[G]` e `(desde DD/MM)` (data do git; sem como provar, `(desde ?)`),
+  e mostre o diff. Não faça commit.
+- **Pastas com 3 ou mais fatias** (`grupo`, ex.: `docs/` com dezenas de `AAAA-MM-DD_FATIA_*.md`): uma pergunta por
+  pasta, não por arquivo. Se a maioria estiver **ignorada** pelo git ou os commits disserem "arquivada"/"concluída":
+  **Deixar onde estão, fora do STATUS.md (Recomendado)** — motivo: "são fatias antigas já arquivadas; o
+  ignorado indica que foi de propósito" · **Registrar em ✅ e mover para `<pasta_executadas>/`** · **Ver uma a uma**.
+  Senão, as mesmas opções sem recomendada (depende de essas fatias ainda valerem).
 
 ## Passo 3b — contradições nas fatias em 📦 (projeto existente; também no Atualizar)
 Pule em projeto novo. Com o STATUS.md já gravado, rode `status-projeto contradicoes`. Ele lê o arquivo de cada fatia em

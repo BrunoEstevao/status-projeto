@@ -5,6 +5,21 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.5.0] — 2026-11-20
+### Adicionado
+- `status-projeto fatias-soltas` (e `fatias_fora_da_pasta` no `estado`): acha todo `FATIA_*.md` fora da pasta das
+  fatias e da pasta das executadas, também com prefixo (`docs/2026-11-14_FATIA_X.md`), versionado, fora do git ou
+  ignorado, e diz se o STATUS.md já o cita. Pasta com 3 ou mais fatias vira um grupo (uma pergunta só).
+  O `/instalar-status` (passo 3a) roda isso sempre: com STATUS.md novo, já existente, ajustado e no Atualizar.
+  Pergunta a fase de cada fatia solta, move para a pasta certa e registra no STATUS.md.
+### Corrigido
+- Fatias soltas ficavam de fora quando o STATUS.md já existia, e arquivos fora do git nem eram vistos (ex.:
+  `FATIA_V3_API_2_CARTAO.md` na raiz).
+- Status espalhado: o nome agora pega ESTADO, STATUS, PROGRESSO, ANDAMENTO (além de TODO, PENDENCIAS, BACKLOG...)
+  em qualquer posição (`ESTADO_ATUAL.md`, `MINERADOR-STATUS.md`), sem confundir palavras como "metodologia". A busca
+  inclui arquivos fora do git e ignorados (marcados assim) e pula `node_modules` e afins. O bloco de regras do
+  plugin no `CLAUDE.md` não conta mais como status. Arquivos de fatia com checklist viram uma linha de contagem.
+
 ## [1.4.0] — 2026-11-20
 ### Adicionado
 - STATUS.md com fases fora do padrão (ex.: `🔨 Em execução` no lugar de `🌐 Codando`): o `estado` lista essas seções

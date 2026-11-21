@@ -28,7 +28,13 @@ GENERICOS = {
     "lint", "format", "style", "wip", "main", "core", "app", "api", "ui", "server", "client", "web", "status",
     "infra", "deploy", "repo", "misc", "geral", "general", "changelog", "version", "versao", "types",
 }
-NOMES_STATUS = re.compile(r"(TODO|ROADMAP|PROGRESSO|PROGRESS|PENDENCIAS|BACKLOG|TASKS|TAREFAS|STATUS)[^/]*\.(md|txt)$", re.I)
+# nome de arquivo de status: a palavra em qualquer posição, separada por início/fim, '-', '_', '.' ou espaço
+# (ESTADO_ATUAL.md, MINERADOR-STATUS.md, STATUS_LOTE.md); "metodologia" não conta como TODO
+NOMES_STATUS = re.compile(r"(?:^|[^a-z0-9])(TODO|ROADMAP|PROGRESSO|PROGRESS|ANDAMENTO|ESTADO|STATUS|PENDENCIAS|"
+                          r"PEND[ÊE]NCIAS|BACKLOG|TASKS|TAREFAS)(?=[^a-z0-9]|$)[^/]*\.(md|txt)$", re.I)
+NOME_FATIA = re.compile(r"(?:^|[^a-z0-9])(FATIA|SLICE)[_\-][^/]*\.md$", re.I)
+PASTAS_PESADAS = {"node_modules", "vendor", "build", "dist", "target", "venv", ".venv", "__pycache__", ".next",
+                  ".nuxt", "coverage", ".git"}
 MARCAS_STATUS = re.compile(r"(^\s*[-*]\s*\[[ xX]\]|STATUS\s*:|\bem andamento\b|\bconclu[ií]d[oa]\b|\bpendente\b|"
                            r"\bbloquead[oa]\b|\bin progress\b|\bdone\b|✅|🚧|⏳)", re.I)
 
@@ -107,23 +113,95 @@ def arquivos_versionados(raiz):
     return lst
 
 
+def arquivos_do_repo(raiz, exts=(".md", ".txt")):
+    """{caminho: situação} dos arquivos com essas extensões: 'versionado', 'fora do git' (nunca adicionado) ou
+    'ignorado' (.gitignore ou .git/info/exclude). Sem git: tudo da pasta. Pastas pesadas (node_modules...) ficam fora."""
+    def ok(rel):
+        partes = rel.split("/")
+        return rel.lower().endswith(exts) and not any(p in PASTAS_PESADAS for p in partes[:-1])
+    if not c.eh_repo_git(raiz):
+        out = {}
+        for dirpath, dirnames, filenames in os.walk(raiz):
+            dirnames[:] = [d for d in dirnames if d not in PASTAS_PESADAS and not d.startswith(".")]
+            for f in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, f), raiz).replace(os.sep, "/")
+                if ok(rel):
+                    out[rel] = "fora do git"
+        return out
+    out = {}
+    for sit, args in (("versionado", ["ls-files"]), ("fora do git", ["ls-files", "--others", "--exclude-standard"]),
+                      ("ignorado", ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"])):
+        for rel in c.git(raiz, *args, timeout=60).splitlines():
+            rel = rel.strip().strip('"')
+            if rel and not rel.endswith("/") and ok(rel) and rel not in out:
+                out[rel] = sit
+    return out
+
+
 def status_espalhado(raiz, cfg=None):
     ignorar = {"STATUS.md", "CHANGELOG.md", c.GUIA}
     pf = (cfg or {}).get("pasta_fatias", "fatias")
     achados = []
-    for rel in arquivos_versionados(raiz):
+    todos = arquivos_do_repo(raiz)
+    for rel, situacao in sorted(todos.items()):
         if rel in ignorar or not rel.lower().endswith((".md", ".txt")) or rel.startswith(c.PASTA_CFG):
             continue
         texto = ler(os.path.join(raiz, rel))
-        if not texto:
+        por_nome = bool(NOMES_STATUS.search(os.path.basename(rel)))
+        texto = re.sub(re.escape(MARCA_INI) + r".*?" + re.escape(MARCA_FIM), "", texto, flags=re.S)  # bloco do plugin
+        if not texto and not por_nome:
             continue
         linhas = [l.strip() for l in texto.splitlines() if MARCAS_STATUS.search(l)]
-        por_nome = bool(NOMES_STATUS.search(os.path.basename(rel)))
         if por_nome or len(linhas) >= 3:
             achados.append({"arquivo": rel, "linhas_com_status": len(linhas), "pelo_nome": por_nome,
-                            "fatia": rel.startswith(pf + "/"), "exemplos": [l[:100] for l in linhas[:3]]})
+                            "fatia": rel.startswith(pf + "/") or bool(NOME_FATIA.search(os.path.basename(rel))),
+                            "situacao": situacao,
+                            "exemplos": [l[:100] for l in linhas[:3]]})
     achados.sort(key=lambda a: (a["fatia"], not a["pelo_nome"], -a["linhas_com_status"]))
     return achados
+
+
+def fatias_fora_da_pasta(raiz, cfg=None):
+    """Arquivos FATIA_*.md (também com prefixo, ex.: docs/2026-11-14_FATIA_X.md) fora da pasta das fatias e da
+    pasta das executadas, versionados ou não, dizendo se o STATUS.md já cita a fatia pelo nome."""
+    pf = (cfg or {}).get("pasta_fatias", "fatias").strip("/")
+    pe = (cfg or {}).get("pasta_fatias_executadas", "fatias_executadas").strip("/")
+    status = ler(os.path.join(raiz, "STATUS.md")).lower()
+    out = []
+    for rel, situacao in sorted(arquivos_do_repo(raiz, (".md",)).items()):
+        if not NOME_FATIA.search(os.path.basename(rel)) or rel.startswith((pf + "/", pe + "/")):
+            continue
+        nome = os.path.basename(rel)[:-3]
+        out.append({"arquivo": rel, "situacao": situacao, "na_raiz": "/" not in rel,
+                    "citada_no_status": nome.lower() in status,
+                    "ultimo_commit": c.git(raiz, "log", "-1", "--format=%ad %s", "--date=short", "--", rel)[:100]})
+    # pasta com 3 ou mais fatias fora do lugar = arquivo de fatias antigas: pergunta-se uma vez pela pasta
+    por_pasta = collections.Counter(os.path.dirname(x["arquivo"]) for x in out)
+    for x in out:
+        d = os.path.dirname(x["arquivo"])
+        x["grupo"] = d if d and por_pasta[d] >= 3 else ""
+    return out
+
+
+def cmd_fatias_soltas(a):
+    cfg = c.ler_config(a.raiz) or {}
+    lst = fatias_fora_da_pasta(a.raiz, cfg)
+    if a.json:
+        print(json.dumps(lst, ensure_ascii=False, indent=2))
+        return
+    if not lst:
+        print(f"Nenhum arquivo FATIA_* fora de {cfg.get('pasta_fatias', 'fatias')}/.")
+        return
+    print(f"Arquivos de fatia fora de {cfg.get('pasta_fatias', 'fatias')}/ (nada foi movido):")
+    for x in [x for x in lst if not x["grupo"]]:
+        tags = [x["situacao"]] + (["citada no STATUS.md"] if x["citada_no_status"] else ["não está no STATUS.md"])
+        print(f"- {x['arquivo']} ({', '.join(tags)})" + (f" — último commit: {x['ultimo_commit']}" if x["ultimo_commit"] else ""))
+    for g in sorted({x["grupo"] for x in lst if x["grupo"]}):
+        do_g = [x for x in lst if x["grupo"] == g]
+        sit = collections.Counter(x["situacao"] for x in do_g)
+        print(f"- {g}/: {len(do_g)} arquivos de fatia (" + ", ".join(f"{n} {s}" for s, n in sit.most_common())
+              + f"; {sum(x['citada_no_status'] for x in do_g)} citados no STATUS.md) — ex.: "
+              + ", ".join(os.path.basename(x["arquivo"]) for x in do_g[:3]))
 
 
 def conflitos_claude_md(texto):
@@ -274,6 +352,7 @@ def cmd_estado(a):
         "estimativa_git": os.path.exists(os.path.join(raiz, c.CSV_ESTIMATIVA)),
         "pastas_fatias_detectadas": pastas,
         "fatias_soltas_na_raiz": na_raiz,
+        "fatias_fora_da_pasta": fatias_fora_da_pasta(raiz, cfg),
         "hooks_manuais_antigos": hooks_manuais(raiz),
     }
     print(json.dumps(saida, ensure_ascii=False, indent=2))
@@ -384,11 +463,15 @@ def cmd_espalhado(a):
         print("Nenhum outro arquivo com status encontrado.")
         return
     print("Arquivos que parecem guardar status (fora do STATUS.md):")
-    for x in achados:
-        tag = " [arquivo de fatia]" if x["fatia"] else ""
+    fatias = [x for x in achados if x["fatia"] and not x["pelo_nome"]]
+    for x in [x for x in achados if x not in fatias]:
+        tag = (" [arquivo de fatia]" if x["fatia"] else "") + ("" if x["situacao"] == "versionado" else f" [{x['situacao']}]")
         print(f"- {x['arquivo']}{tag}: {x['linhas_com_status']} linhas" + (" (nome de arquivo de status)" if x["pelo_nome"] else ""))
         for e in x["exemplos"]:
             print(f"    · {e}")
+    if fatias:
+        print(f"- e {len(fatias)} arquivos de fatia com checklist/marcas de status (normal em fatia; o status delas "
+              "passa a ser o item no STATUS.md — veja `status-projeto fatias-soltas`)")
 
 
 # ------------------------------------------------------------------- contradições nas fatias em 📦
@@ -1507,6 +1590,8 @@ def main():
     x.add_argument("--ajustar", action="append", metavar="TITULO=FASE",
                    help="troca uma seção fora do padrão pela fase padrão, juntando os itens (pode repetir)")
     x.add_argument("--marcar", action="store_true", help="marca a etapa status_md como feita")
+    x = s.add_parser("fatias-soltas", help="arquivos FATIA_* fora da pasta das fatias (versionados ou não)")
+    x.add_argument("--json", action="store_true")
     x = s.add_parser("espalhado", help="lista status espalhado em outros arquivos")
     x.add_argument("--json", action="store_true")
     x = s.add_parser("contradicoes", help="instruções das fatias em 📦 que contradizem as regras do plugin")
