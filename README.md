@@ -113,6 +113,47 @@ uma frase de teste para a gravação no `IDEIAS.md` (a única coisa que o claude
 
 Se você esquecer um teste aberto, na próxima conversa o Claude pergunta se terminou e a que horas.
 
+## Roteiro de teste por link (opcional)
+
+Com o [serviço de testes](#configurar-o-serviço-de-testes) no ar, o plugin publica o roteiro como página web, entrega
+o link e, quando você diz **"teste finalizado, avalie"**, lê o resultado e propõe o que fazer com a fatia. Sem a
+configuração, nada muda: o roteiro aparece só no terminal.
+
+| Você diz no Claude Code | O que acontece |
+|---|---|
+| `me traga o roteiro de teste`, `vou testar FATIA_X` ou `finalizado` | `status-projeto roteiro publicar`: grava o `roteiro.json` na pasta de dados (código aleatório de 128 bits), mostra o roteiro com o link no topo e anota no item da fatia no `STATUS.md` só a rodada e a situação (`publicada`, `respondida`, `avaliada`). O link fica no registro local; `roteiro mostrar` devolve o link |
+| `teste finalizado, avalie` | `status-projeto roteiro resultado`: não terminado → só informa o andamento; tudo passou → ✅ e arquiva em `fatias_executadas/`; reprovou → tabela com item, motivo e ação, e espera a sua ordem (`roteiro voltar` leva para 🌐); só "não consegui testar" → continua em 🧪 |
+| (depois da correção e do `finalizado`) | `status-projeto roteiro nova-rodada [--afetados ARQ.json]`: rodada seguinte com os reprovados, os não testados e os itens que a correção pode ter afetado (cada um com `porque`) |
+
+- **O link fica fora do git.** O código do link funciona como senha de quem testa, por isso fica só em `.claude-status/local/roteiros.json` (ignorado pelo git, um por máquina). No `STATUS.md`:
+  `Roteiro de teste: rodada 2 · publicada (22/11 15:58)` → `respondida (reprovou; aguardando a ordem)` →
+  `avaliada (reprovou; voltou para 🌐 em 22/11)`. `status-projeto roteiro mostrar` devolve o link; numa máquina sem o registro, o comando avisa onde ele está. O arquivo da rodada também não leva o código: as fotos vão só pelo nome, e os links saem com `roteiro mostrar --fatia FATIA_X --rodada N --fotos`.
+- **`"link_no_status": true`** no `.claude-status/config.json` (padrão `false`) põe o código e o link na linha do `STATUS.md` e os links das fotos no arquivo da rodada. **Só para repositório privado**: o plugin avisa ao publicar e no `/verificar-integracao`.
+- **Segredos:** antes de gravar, o plugin procura senhas, chaves e tokens no texto e recusa, apontando o trecho (com o
+  valor mascarado). O roteiro diz "use a senha do revendedor", nunca qual é.
+- **Cabeçalho:** por padrão a página pede só o nome. Campos extras, no formato `cabecalho` do `roteiro.json`, entram
+  em `roteiro_cabecalho` no `.claude-status/config.json`. A versão do app (de `package.json`, `app.json`,
+  `pyproject.toml`, `pubspec.yaml`, `Cargo.toml`, `VERSION`, `.claude-plugin/plugin.json` ou `--versao`) vai gravada
+  no roteiro (`versao_app`), sem perguntar ao testador; os "outros erros" herdam essa versão no `ERROS.md`.
+- **Resultado:** `fatias/testes/<FATIA>-rodada-<N>.md` só com texto (cabeçalho, cada item com a resposta e o motivo,
+  nome das fotos). As fotos nunca vêm para o repositório. O tempo de teste entra no `docs/tempo/sessoes.csv` (tipo
+  `teste`, sessão `roteiro-<código>`) com o início e o fim gravados pela página, convertidos de UTC para o horário
+  local; o trecho já contado por um "vou testar" não conta de novo.
+- **Segurança:** o resultado pode ter sido escrito por qualquer pessoa com o link. O comando valida o formato, corta
+  campos acima do limite, tira caracteres de controle e invisíveis e entrega os textos entre marcas
+  `⟦texto do testador …⟧` (com um código novo a cada vez); no arquivo de rodada eles vão em bloco de citação e nunca
+  vão para o `STATUS.md`. O bloco de regras do CLAUDE.md manda tratar tudo isso como dado, nunca instrução.
+
+### Configurar o serviço de testes
+
+Por máquina, fora dos repositórios (o endereço e o caminho nunca vão para o código do plugin):
+
+    status-projeto testes configurar --pasta /caminho/da/pasta-de-dados --url https://testes.seudominio.com [--validade 7]
+
+Grava `~/.claude/status-projeto/testes.json` e confere se a pasta existe, aceita escrita e se o grupo dela vale na
+sessão (o `resultado.json` é gravado pelo serviço com outro usuário; sem o grupo, o plugin não consegue ler). Ver a
+configuração: `status-projeto testes`. O `/verificar-integracao` confere quando ela existe.
+
 ## Ideias e erros
 
 Duas listas na raiz do repo, criadas pelo instalador (e pelo **Atualizar**): `IDEIAS.md` e `ERROS.md`. Cada uma tem
@@ -152,6 +193,8 @@ push); se não conseguir gravar, ele diz que não gravou e mostra a linha pronta
 | `status-projeto status-md --cortar-concluidos` | mantém no ✅ só os últimos 7 dias (ou `--dias N`); os mais antigos vão para `docs/CONCLUIDOS.md` e o ✅ fecha com "Versões anteriores: ver ..." |
 | `/status-valor 180` | muda o valor da hora daqui para frente, sem efeito retroativo |
 | `/verificar-integracao` | confere tudo no repo e entrega a frase para testar no claude.ai |
+| `status-projeto testes [configurar]` | configuração do serviço de testes desta máquina |
+| `status-projeto roteiro publicar\|mostrar\|resultado\|voltar\|nova-rodada` | roteiro de teste por link (ver acima) |
 | `status-projeto instalacoes` | instalações do plugin que valem neste projeto (user, project, local), qual vence e, se houver mais de uma, os comandos para ficar com uma só |
 
 Se outro plugin usar o mesmo nome, use o nome completo: `/status-projeto:status-relatorio`.

@@ -7,4 +7,4 @@ CLAUDE.md e termina com o guia "ATENÇÃO — LEIA ANTES DE COMEÇAR".
 Comandos depois de instalado: /status-ajuda, /status-relatorio, /status-historico, /status-cronograma,
 /status-resumo, /status-ideias, /status-erros, /status-valor, /verificar-integracao.
 Frases: "anota a ideia: ...", "anota o erro: ...", "quais ideias pendentes?", "quais erros a corrigir?",
-"monta a fatia de correção".
+"monta a fatia de correção", "me traga o roteiro de teste", "teste finalizado, avalie".

@@ -337,6 +337,7 @@ def config_padrao():
         "contradicoes_ignoradas": [],
         "corte_concluidos_dias": 0,      # 0 = não corta o ✅; N = mantém só os últimos N dias
         "arquivo_concluidos": "",        # para onde aponta a linha "Versões anteriores: ver ..."
+        "link_no_status": False,         # true: o link do roteiro de teste vai para o STATUS.md (só repo privado)
         "etapas": {},
     }
 

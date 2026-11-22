@@ -1,6 +1,6 @@
 ---
 name: verificar-integracao
-description: Confere toda a instalação do status-projeto no repo (config, STATUS.md, CLAUDE.md, hooks gravando, .gitattributes, .gitignore, guia, GitHub) e entrega a frase para testar no claude.ai.
+description: Confere toda a instalação do status-projeto no repo (config, STATUS.md, CLAUDE.md, hooks gravando, .gitattributes, .gitignore, guia, GitHub e, quando existe, a configuração do serviço de testes) e entrega a frase para testar no claude.ai.
 allowed-tools: Bash(status-projeto *)
 ---
 Rode `status-projeto verificar`. **Antes de tudo**, se o começo da saída disser "ATENÇÃO: N instalações valendo ao

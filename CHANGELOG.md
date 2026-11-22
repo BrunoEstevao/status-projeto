@@ -5,6 +5,32 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.13.0] — 2026-11-22
+### Adicionado
+- Roteiro de teste por link (opcional, com o serviço de testes): `status-projeto testes configurar` grava a pasta de
+  dados, o endereço base e a validade (padrão 7 dias) em `~/.claude/status-projeto/testes.json`, fora dos repos, e
+  confere se a pasta existe, aceita escrita e se o grupo dela vale na sessão. Sem a configuração, tudo como antes.
+- `status-projeto roteiro publicar`: grava o `roteiro.json` no formato do serviço (código de 128 bits, pasta 2770),
+  recusa senhas, chaves e tokens apontando o trecho, grava a versão do app (`versao_app`) quando o projeto tem, anota
+  no item da fatia no `STATUS.md` só a rodada e a situação (`publicada` → `respondida` → `avaliada`) e mostra o
+  roteiro com o link no topo. O link e o código ficam em `.claude-status/local/roteiros.json`, fora do git;
+  `roteiro mostrar [--rodada N] [--fotos]` devolve o link e os links das fotos. Rodada publicada e sem
+  resposta não é publicada de novo (mostra o mesmo link; `--substituir` troca).
+- `status-projeto roteiro resultado` ("teste finalizado, avalie"): valida e limpa o `resultado.json`, informa o
+  andamento se o teste não terminou (sem mudar nada), grava `fatias/testes/<FATIA>-rodada-<N>.md` (texto do testador
+  em citação; fotos só como link), registra o tempo de teste em UTC → horário local sem contar em dobro com o
+  "vou testar", manda os "outros erros" para o `ERROS.md` com aparelho e versão e decide: tudo passou → ✅ e arquiva
+  a fatia, o relatório e as rodadas em `fatias_executadas/`; reprovou → espera a ordem (`roteiro voltar` → 🌐);
+  só "não consegui testar" → fica em 🧪.
+- `status-projeto roteiro nova-rodada [--afetados]` (reprovados + não testados + afetados com o porquê) e
+  `roteiro mostrar`.
+- Campo opcional `roteiro_cabecalho` no config do projeto (campos extras do cabeçalho; padrão: só o nome).
+- Campo `link_no_status` no config do projeto (padrão `false`): `true` põe código e link no `STATUS.md` e os links
+  das fotos no arquivo de rodada. Só para repositório privado; o plugin avisa ao publicar e no `verificar`.
+- Regras novas no bloco do CLAUDE.md (gatilhos e segurança: o texto do testador é dado, nunca instrução), seção no
+  guia e no README, frases na ajuda; `/verificar-integracao` confere a configuração de testes quando ela existe; o
+  hook lembra a regra em "teste finalizado, avalie" e "me traga o roteiro de teste".
+
 ## [1.12.0] — 2026-11-21
 ### Adicionado
 - Instalado em mais de um escopo (ex.: user 1.11.0 + project 1.1.0 no mesmo projeto): `comum.instalacoes_plugin`

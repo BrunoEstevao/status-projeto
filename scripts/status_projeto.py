@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import comum as c  # noqa: E402
 import listas as L  # noqa: E402
+import roteiro as R  # noqa: E402
 
 TEMPLATES = os.path.join(c.RAIZ_PLUGIN, "templates")
 MARCA_INI = "<!-- status-projeto:inicio"
@@ -2015,6 +2016,13 @@ def cmd_verificar(a):
     e1, e2 = checar_gitignore(raiz)
     ok(not e1 and not e2, ".gitignore certo", "; ".join([f"{x} ignorado" for x in e1] + [f"{x} não ignorado" for x in e2]))
     ok(os.path.exists(os.path.join(raiz, c.GUIA)), f"guia {c.GUIA}")
+    tcfg = R.ler_config()
+    if tcfg is not None:  # só quando a máquina tem o serviço de testes configurado
+        probs = R.problemas_pasta(tcfg["pasta_dados"])
+        ok(not probs, f"serviço de testes: {tcfg['pasta_dados']} (link {tcfg['url_base']}/t/…, "
+           f"validade {tcfg['validade_dias']} dias)", "; ".join(probs))
+        if R.link_no_status(cfg):
+            print("AVISO: " + R.AVISO_LINK + ".")
     gh = c.remoto_github(raiz)
     ok(gh, f"remote no GitHub ({gh or 'nenhum'})", "o claude.ai lê o repo pelo GitHub: crie o remote e faça push")
     if gh:
@@ -2194,6 +2202,104 @@ def cmd_colar(a):
     print(f"Linha gravada no fim de {arq}." if gravou else f"Essa linha já está em {arq}; nada mudou.")
 
 
+
+# =================================================================== roteiro de teste por link (serviço de testes)
+
+def _ler_itens(arq):
+    try:
+        texto = sys.stdin.read() if arq == "-" else ler(arq, None)
+    except OSError as e:
+        sair(f"Não consegui ler {arq}: {e}")
+    if texto is None:
+        sair(f"Arquivo {arq} não existe.")
+    try:
+        return json.loads(texto)
+    except ValueError as e:
+        sair(f"{arq} não é um JSON válido: {e}")
+
+
+@_recusa
+def cmd_testes(a):
+    """Configuração do serviço de testes desta máquina (fora dos repositórios)."""
+    if a.acao == "configurar":
+        if not a.pasta or not a.url:
+            sair("Use: status-projeto testes configurar --pasta /caminho/dos/dados --url https://testes.exemplo.com "
+                 "[--validade 7]")
+        d, probs = R.gravar_config(a.pasta, a.url, a.validade)
+        print(f"Configuração gravada em {R.caminho_config()}:")
+        print(f"  pasta de dados: {d['pasta_dados']}\n  endereço base: {d['url_base']}\n  validade do link: "
+              f"{d['validade_dias']} dias")
+        if probs:
+            print("PROBLEMAS na pasta de dados (avise o usuário):")
+            for x in probs:
+                print(f"  ❌ {x}")
+            sys.exit(3)
+        print("  ✅ a pasta existe, aceita escrita e o grupo dela vale nesta sessão")
+        return
+    t = R.ler_config()
+    if t is None:
+        print(f"Sem configuração de testes ({R.caminho_config()}): o roteiro fica só no terminal, como antes.")
+        sys.exit(2)
+    print(f"Configuração de testes ({R.caminho_config()}):")
+    print(f"  pasta de dados: {t['pasta_dados']}\n  endereço base: {t['url_base']}\n  validade do link: "
+          f"{t['validade_dias']} dias")
+    probs = R.problemas_pasta(t["pasta_dados"])
+    for x in probs:
+        print(f"  ❌ {x}")
+    if not probs:
+        print("  ✅ a pasta existe, aceita escrita e o grupo dela vale nesta sessão")
+    sys.exit(3 if probs else 0)
+
+
+@_recusa
+def cmd_roteiro(a):
+    raiz = a.raiz
+    cfg = precisa_config(raiz)
+    bruno = cfg.get("usuario") or "o usuário"
+    if a.acao == "publicar":
+        if not a.itens:
+            sair("Use --itens ARQUIVO.json (ou --itens - para ler da entrada) com a lista de "
+                 "{\"titulo\", \"passos\", \"esperado\"}.")
+        pub = R.publicar(raiz, cfg, a.fatia, _ler_itens(a.itens), titulo=a.titulo, introducao=a.introducao,
+                         versao=a.versao, substituir=a.substituir)
+    elif a.acao == "nova-rodada":
+        afe = _ler_itens(a.afetados) if a.afetados else []
+        afe = afe.get("itens", []) if isinstance(afe, dict) else afe
+        pub = R.nova_rodada(raiz, cfg, a.fatia, afetados=afe, titulo=a.titulo, versao=a.versao)
+    elif a.acao == "mostrar":
+        print(R.mostrar(raiz, cfg, a.fatia, rodada=a.rodada, fotos=a.fotos))
+        return
+    elif a.acao == "resultado":
+        av = R.avaliar(raiz, cfg, a.fatia)
+        if a.json:
+            print(json.dumps(R.json_avaliacao(av), ensure_ascii=False, indent=2))
+        else:
+            print(R.texto_avaliacao(av, bruno))
+        return
+    elif a.acao == "voltar":
+        nome, reprov = R.voltar(raiz, cfg, a.fatia)
+        print(f"{nome} voltou para 🌐 com os itens reprovados ({', '.join(map(str, reprov))}) em Pendente:. "
+              "Mostre o que mudou no STATUS.md.")
+        return
+    else:
+        sair("Ações: publicar, mostrar, resultado, voltar, nova-rodada.")
+    extra = ""
+    if a.acao == "nova-rodada":
+        extra = (f" Repetidos da rodada anterior: itens {', '.join(map(str, pub['repetidos'])) or 'nenhum'}; "
+                 f"afetados pela correção: {pub['afetados']}.")
+    print(("Rodada substituída" if pub["substituiu"] else "Roteiro publicado") +
+          f": {pub['fatia']} · rodada {pub['rodada']} · anotado no STATUS.md ({pub['fase']}).{extra}")
+    if pub["link_no_status"]:
+        print("AVISO: " + R.AVISO_LINK + ".")
+    else:
+        print(f"O link fica só nesta máquina ({c.PASTA_LOCAL}/{R.ARQ_LOCAL}, fora do git); "
+              "no STATUS.md vão a rodada e a situação. Para ver de novo: `status-projeto roteiro mostrar`.")
+    if not pub["roteiro"].get("versao_app"):
+        print("(o projeto não tem versão do app num arquivo conhecido: o roteiro vai sem versão)")
+    print()
+    print(R.texto_roteiro(pub["roteiro"], pub["link"]))
+
+
 # =================================================================== main
 
 def main():
@@ -2299,6 +2405,23 @@ def main():
     x.add_argument("--json", action="store_true")
     x = s.add_parser("colar", help="grava em IDEIAS.md/ERROS.md uma linha pronta (a que o claude.ai mostra)")
     x.add_argument("linha", nargs="+")
+    x = s.add_parser("testes", help="configuração do serviço de testes desta máquina (fora dos repos)")
+    x.add_argument("acao", nargs="?", default="mostrar", choices=["mostrar", "configurar"])
+    x.add_argument("--pasta", default="", help="pasta de dados do serviço")
+    x.add_argument("--url", default="", help="endereço base do link (ex.: https://testes.exemplo.com)")
+    x.add_argument("--validade", type=int, default=R.VALIDADE_PADRAO, help="validade do link em dias (padrão 7)")
+    x = s.add_parser("roteiro", help="roteiro de teste por link: publicar, mostrar, resultado, voltar, nova-rodada")
+    x.add_argument("acao", choices=["publicar", "mostrar", "resultado", "voltar", "nova-rodada"])
+    x.add_argument("--fatia", default="", help="FATIA_X (padrão: a única em 🧪 com roteiro)")
+    x.add_argument("--itens", default="", help="publicar: JSON com os itens (lista de {titulo, passos, esperado}); - lê da entrada")
+    x.add_argument("--afetados", default="", help="nova-rodada: JSON com os itens que a correção pode ter afetado ({titulo, passos, esperado, porque})")
+    x.add_argument("--titulo", default="")
+    x.add_argument("--introducao", default="")
+    x.add_argument("--versao", default=None, help="versão do app (padrão: a do projeto, quando houver)")
+    x.add_argument("--substituir", action="store_true", help="publicar: troca a rodada ainda não avaliada")
+    x.add_argument("--json", action="store_true", help="resultado: em JSON")
+    x.add_argument("--rodada", type=int, default=None, help="mostrar: uma rodada anterior (registro local)")
+    x.add_argument("--fotos", action="store_true", help="mostrar: também os links das fotos da rodada")
     s.add_parser("verificar", help="confere a integração")
     x = s.add_parser("instalacoes", help="instalações do plugin que valem aqui (user/project) e como ficar com uma")
     x.add_argument("--json", action="store_true")

@@ -1,8 +1,8 @@
 {
   "name": "status-projeto",
   "displayName": "Status do Projeto",
-  "version": "1.12.0",
-  "description": "Status do projeto num lugar só (STATUS.md com 5 fases) e tempo/custo medidos por hooks, com estimativa inicial pelo git, relatórios, cronograma, ideias e erros (IDEIAS.md, ERROS.md) e integração com o claude.ai.",
+  "version": "1.13.0",
+  "description": "Status do projeto num lugar só (STATUS.md com 5 fases) e tempo/custo medidos por hooks, com estimativa inicial pelo git, relatórios, cronograma, ideias e erros (IDEIAS.md, ERROS.md) e integração com o claude.ai e roteiro de teste por link.",
   "author": { "name": "status-projeto" },
   "license": "MIT",
   "keywords": ["status", "horas", "custo", "fatias", "timesheet", "pt-br"]
