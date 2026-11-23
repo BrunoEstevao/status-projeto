@@ -2278,8 +2278,8 @@ def cmd_roteiro(a):
         return
     elif a.acao == "voltar":
         nome, reprov = R.voltar(raiz, cfg, a.fatia)
-        print(f"{nome} voltou para 🌐 com os itens reprovados ({', '.join(map(str, reprov))}) em Pendente:. "
-              "Mostre o que mudou no STATUS.md.")
+        print(f"{nome} voltou para 🌐 com " + (f"os itens reprovados ({', '.join(map(str, reprov))})" if reprov
+              else "o que ficou do teste interrompido") + " em Pendente:. Mostre o que mudou no STATUS.md.")
         return
     else:
         sair("Ações: publicar, mostrar, resultado, voltar, nova-rodada.")

@@ -5,6 +5,24 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.14.0] — 2026-11-22
+### Adicionado
+- Teste interrompido para correção ("Parar para corrigir erros" no serviço de testes): `roteiro resultado` lê o
+  `resultado.json` no formato 2 (`situacao` `interrompido`, itens `sem_resposta`, `observacao_geral`) e avalia como
+  resultado final. No terminal: a observação geral no topo, entre as marcas do texto do testador, e a tabela de ações
+  com uma linha por item reprovado e uma linha só "N itens não chegaram a ser testados" com os títulos, sem ação. No
+  `STATUS.md`: `respondida (interrompido para correção; aguardando a ordem)` e o `Pendente:` com os reprovados e a
+  quantidade de itens sem resposta, e nada mais até a ordem. No arquivo de rodada: a situação, a observação em
+  citação e os sem resposta numa lista própria. Os "outros erros" vão para o `ERROS.md` e o tempo conta do início à
+  interrupção, no horário local, sem duplicar com o "vou testar".
+- `roteiro voltar` aceita o teste interrompido (volta para 🌐 com o mesmo `Pendente:`).
+- `roteiro nova-rodada` repete também os `sem_resposta` e cita na introdução cada item pelo título, com o porquê.
+- JSON da avaliação: `situacao_teste`, `sem_resposta` e `observacao_geral` (como `texto_do_testador`).
+- Regra nova no bloco do CLAUDE.md, seção no guia e no README.
+### Compatível
+- Resultados no formato 1 continuam sendo lidos como antes; teste `aberto` continua só informando o andamento.
+- Rodada interrompida e ainda não avaliada impede publicar outra, como a terminada.
+
 ## [1.13.0] — 2026-11-22
 ### Adicionado
 - Roteiro de teste por link (opcional, com o serviço de testes): `status-projeto testes configurar` grava a pasta de

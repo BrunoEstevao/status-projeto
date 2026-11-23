@@ -122,8 +122,8 @@ configuração, nada muda: o roteiro aparece só no terminal.
 | Você diz no Claude Code | O que acontece |
 |---|---|
 | `me traga o roteiro de teste`, `vou testar FATIA_X` ou `finalizado` | `status-projeto roteiro publicar`: grava o `roteiro.json` na pasta de dados (código aleatório de 128 bits), mostra o roteiro com o link no topo e anota no item da fatia no `STATUS.md` só a rodada e a situação (`publicada`, `respondida`, `avaliada`). O link fica no registro local; `roteiro mostrar` devolve o link |
-| `teste finalizado, avalie` | `status-projeto roteiro resultado`: não terminado → só informa o andamento; tudo passou → ✅ e arquiva em `fatias_executadas/`; reprovou → tabela com item, motivo e ação, e espera a sua ordem (`roteiro voltar` leva para 🌐); só "não consegui testar" → continua em 🧪 |
-| (depois da correção e do `finalizado`) | `status-projeto roteiro nova-rodada [--afetados ARQ.json]`: rodada seguinte com os reprovados, os não testados e os itens que a correção pode ter afetado (cada um com `porque`) |
+| `teste finalizado, avalie` | `status-projeto roteiro resultado`: não terminado → só informa o andamento; tudo passou → ✅ e arquiva em `fatias_executadas/`; reprovou → tabela com item, motivo e ação, e espera a sua ordem (`roteiro voltar` leva para 🌐); interrompido para correção → igual ao reprovado, com a observação geral no topo e os sem resposta numa linha só; só "não consegui testar" → continua em 🧪 |
+| (depois da correção e do `finalizado`) | `status-projeto roteiro nova-rodada [--afetados ARQ.json]`: rodada seguinte com os reprovados, os não testados, os sem resposta e os itens que a correção pode ter afetado (cada um com `porque`); na introdução, todos pelo título |
 
 - **O link fica fora do git.** O código do link funciona como senha de quem testa, por isso fica só em `.claude-status/local/roteiros.json` (ignorado pelo git, um por máquina). No `STATUS.md`:
   `Roteiro de teste: rodada 2 · publicada (22/11 15:58)` → `respondida (reprovou; aguardando a ordem)` →
@@ -139,6 +139,15 @@ configuração, nada muda: o roteiro aparece só no terminal.
   nome das fotos). As fotos nunca vêm para o repositório. O tempo de teste entra no `docs/tempo/sessoes.csv` (tipo
   `teste`, sessão `roteiro-<código>`) com o início e o fim gravados pela página, convertidos de UTC para o horário
   local; o trecho já contado por um "vou testar" não conta de novo.
+- **"Parar para corrigir erros":** o botão da página (aparece com pelo menos um reprovado ou um "outro erro") encerra o
+  teste sem marcar o resto, com uma observação geral opcional. O `resultado.json` vem no formato 2, com `situacao`
+  `interrompido`, os itens que faltavam como `sem_resposta` e o `observacao_geral`. O plugin trata isso como resultado
+  final: no terminal, a observação no topo (como texto do testador), uma linha de ação por item reprovado e uma linha
+  só "N itens não chegaram a ser testados" com os títulos; no `STATUS.md`, `respondida (interrompido para correção;
+  aguardando a ordem)` e o `Pendente:` com os reprovados e quantos ficaram sem resposta; no arquivo de rodada, a
+  situação, a observação em citação e os sem resposta numa lista própria. Os "outros erros" vão para o `ERROS.md`, o
+  tempo conta do início à interrupção, e com a sua ordem a fatia volta para 🌐. Teste `aberto` continua só informando
+  o andamento; resultados no formato 1 são lidos como antes.
 - **Segurança:** o resultado pode ter sido escrito por qualquer pessoa com o link. O comando valida o formato, corta
   campos acima do limite, tira caracteres de controle e invisíveis e entrega os textos entre marcas
   `⟦texto do testador …⟧` (com um código novo a cada vez); no arquivo de rodada eles vão em bloco de citação e nunca
