@@ -22,11 +22,30 @@
 - **"finalizado"** — o código da fatia em 🌐 ficou pronto: mova para 🧪 com a data de hoje, com o roteiro de teste
   curto (o que {{usuario}} precisa conferir) e publique o roteiro (seção "Roteiro de teste por link"). Mostre o que
   mudou no `STATUS.md`.
-- **"vou testar [fatia]"** — o hook abre o tempo de teste. Se o item não estiver em 🧪, mova para lá e publique o
-  roteiro (seção abaixo; se já estiver publicado, mostre o mesmo link). Confirme em uma linha.
-- **"terminei o teste [às HH:MM]"** — o hook fecha o tempo de teste. Pergunte se passou: passou → ✅ com a data de hoje
-  (e a fatia vai para `{{pasta_executadas}}/`); não passou → volta para 🌐 com o que falhou em `Pendente:`.
+- **"vou testar [fatia]"** (ou "ok, vou testar agora a FATIA_X") — o hook abre o tempo de teste. Se o item não estiver
+  em 🧪, mova para lá e publique o roteiro (seção abaixo; se já estiver publicado, mostre o mesmo link). Confirme em
+  uma linha. **Não abre** com adiamento ("vou testar mais tarde / depois / amanhã"), negação ("não vou testar") ou
+  pergunta ("será que vou testar?"). Se o hook disser que não deu para ter certeza ("vou testar" no meio da frase),
+  pergunte a {{usuario}}; para abrir, a mensagem começa com "vou testar FATIA_X".
+- **"terminei o teste [às HH:MM | em DD/MM às HH:MM]"** — vale em qualquer ponto da mensagem ("deu certo, terminei o
+  teste"), mas não com negação ("ainda não terminei o teste"). O hook fecha o tempo no **horário dito** (sem horário,
+  na hora da mensagem; passou da meia-noite, é o dia seguinte). Horário antes do início, no futuro, ou que aconteceu
+  em mais de um dia sem a data: o hook **não grava** e avisa; pergunte o horário real (ou a data). Fechado, pergunte se
+  passou: passou → ✅ com a data de hoje (e a fatia vai para `{{pasta_executadas}}/`); não passou → volta para 🌐 com o
+  que falhou em `Pendente:`.
+- **Teste longo: "confirmo"** — teste que ficaria com **mais de 2 h** não é gravado de cara: o hook mostra a duração.
+  Mostre a {{usuario}} e peça confirmação. Só uma resposta que **começa com "confirmo"** grava (um "sim" solto não);
+  se o horário estiver errado, a resposta é "terminei o teste às HH:MM" com o horário real. "vou testar" com um teste
+  aberto há mais de 2 h não abre outro: pergunte antes a que horas o anterior terminou.
 - **Teste aberto e esquecido** — se o hook avisar que há teste aberto, pergunte **uma vez** se terminou e a que horas.
+  Aberto há **mais de 12 h**, "terminei o teste" sem horário não fecha pela hora atual: pergunte o horário real
+  ("terminei o teste em DD/MM às HH:MM").
+- **Sessão gravada errada** (ex.: teste que não aconteceu) — nunca edite o `docs/tempo/sessoes.csv`: rode
+  `status-projeto sessao listar [--dia AAAA-MM-DD] [--tipo teste]`, mostre a linha a {{usuario}} e, com o sim,
+  `status-projeto sessao corrigir --linha N --anular --motivo "..."` (tempo zero) ou `--novo-fim "AAAA-MM-DD HH:MM"`
+  / `--novo-inicio` / `--novo-tipo` / `--nova-fatia`. A correção é uma linha a mais no fim do arquivo (nada é apagado
+  nem reescrito; vale a mais recente) e os relatórios já mostram o valor corrigido. `status-projeto sessao correcoes`
+  lista antes, depois e motivo.
 - **"fecha o dia"** (e ao fim de toda sessão) — atualize `Parei em` / `Próximo passo` / `Pendente` de cada item em 🌐,
   confira datas e fases, mostre o que mudou e faça commit do `STATUS.md` e de `docs/tempo/` (e push, se houver remote).
 - **"vou planejar"** / modo plano — o tempo conta como planejamento até "vou começar a codar".
@@ -109,7 +128,8 @@
   instalação"); **nunca refazer** essa estimativa. Relatórios mostram sempre estimado e medido separados.
 - Valor da hora em `.claude-status/config.json` (`valor_hora`, com histórico). Mudar só pelo `/status-valor`: vale dali
   para frente, nunca retroativo.
-- `docs/tempo/sessoes.csv` tem `merge=union` no `.gitattributes`; nunca apagar nem reescrever linhas à mão.
+- `docs/tempo/sessoes.csv` tem `merge=union` no `.gitattributes`; nunca apagar nem reescrever linhas à mão. Correção
+  só pelo `status-projeto sessao corrigir` (regra "Sessão gravada errada", acima).
 - Comandos: `/status-relatorio`, `/status-historico`, `/status-cronograma`, `/status-resumo`, `/status-ideias`,
   `/status-erros`, `/status-valor`, `/status-ajuda`, `/verificar-integracao`. Guia completo: `docs/COMO_USAR_STATUS.md`.
 <!-- status-projeto:fim -->

@@ -5,6 +5,35 @@ Regra de compatibilidade: versão nova nunca exige reinstalar. Campos novos do `
 valor padrão (`comum.migrar`); `STATUS.md`, `sessoes.csv` e `estimativa_git.csv` nunca são reescritos por atualização;
 as colunas do `sessoes.csv` só podem ganhar colunas novas no fim.
 
+## [1.15.0] — 2026-11-25
+### Adicionado
+- `status-projeto sessao listar | corrigir | correcoes`: corrige uma sessão do `docs/tempo/sessoes.csv` sem apagar
+  nem reescrever nada. `corrigir --linha N` (o nº que o `listar` mostra) ou `--inicio "AAAA-MM-DD HH:MM"`, com
+  `--anular` (tempo zero) ou `--novo-inicio` / `--novo-fim` / `--novo-tipo` / `--nova-fatia`, e `--motivo`
+  obrigatório. A correção é uma linha a mais no fim do arquivo (dados no campo `sessao`: `correcao|quando|ação|
+  sessão|início|tipo|motivo`); vale a mais recente, mesmo que a linha original tenha fim mais tarde. Recusa (código
+  3) sem motivo, fim antes do início ou no futuro, e correção de uma linha de correção. `relatorio`, `historico`,
+  `resumo`, `ajuda`, `erro anotar` e o tempo do roteiro por link já usam o valor corrigido; os relatórios dizem
+  quantas sessões corrigidas entraram. Teste aberto anulado deixa de estar aberto.
+- Proteção para teste longo: fechar um teste com mais de 2 h mostra a duração e só grava com uma resposta que começa
+  com "confirmo"; "vou testar" com teste aberto há mais de 2 h não abre outro nem fecha o anterior pela hora atual;
+  teste aberto há mais de 12 h não fecha pela hora atual (pergunta o horário real).
+### Corrigido
+- "vou testar" abria teste em qualquer frase, inclusive "vou testar mais tarde". Agora não abre com adiamento
+  (mais tarde, depois, amanhã, dia da semana etc.), negação ou pergunta; no meio de outra frase não abre e o Claude
+  pergunta.
+- "terminei o teste" só era reconhecido no começo da mensagem. Agora vale em qualquer ponto (também "acabei os
+  testes", "terminei de testar"), menos com negação ("ainda não terminei o teste") ou pergunta.
+- O horário de "terminei o teste às HH:MM" se perdia: com a frase fora do começo da mensagem nada era reconhecido,
+  e um horário antes do início do teste virava, sem aviso, a hora em que a mensagem chegou. Agora o fim é o horário
+  dito, com data opcional ("em 24/11 às 21:30"); passou da meia-noite é o dia seguinte; horário antes do início, no
+  futuro ou ambíguo (mais de um dia possível) não é gravado e o Claude pergunta.
+- Regras novas no bloco do CLAUDE.md (frases de teste, "confirmo", sessão gravada errada), no guia, no README e no
+  `/status-ajuda` (mostra o fim que espera confirmação).
+### Compatível
+- Colunas do `sessoes.csv` não mudam; arquivos sem correção são lidos como antes. As linhas de correção ficam sempre
+  no fim do arquivo quando o hook o regrava, para o nº de linha das sessões não mudar entre uma correção e outra.
+
 ## [1.14.0] — 2026-11-22
 ### Adicionado
 - Teste interrompido para correção ("Parar para corrigir erros" no serviço de testes): `roteiro resultado` lê o

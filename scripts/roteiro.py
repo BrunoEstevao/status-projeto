@@ -851,13 +851,15 @@ def registrar_tempo(raiz, nome, codigo, ini, fim):
         if any(l["sessao"] == sid for l in linhas):
             return None
         mudou = False
+        corr = c.correcoes(linhas)  # [1.15.0] teste corrigido/anulado fica como a correção disse
         for l in linhas:
-            if l["tipo"] == "teste" and l["estado"] != "fechada" and c.mesma_fatia(l["fatia"], nome):
+            if (l["tipo"] == "teste" and l["estado"] != "fechada" and c.mesma_fatia(l["fatia"], nome)
+                    and c.chave_sessao(l) not in corr):
                 li = c.para_dt(l["inicio"]) or fim
                 l["fim"], l["estado"] = max(li, fim).strftime(c.FMT), "fechada"
                 mudou = True
         cobertos = []
-        for l in linhas:
+        for l in c.aplicar_correcoes(linhas):  # [1.15.0] o tempo corrigido é o que vale
             a, b = c.para_dt(l["inicio"]), c.para_dt(l["fim"])
             if l["tipo"] == "teste" and a and b:
                 cobertos.append((a, b))

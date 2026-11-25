@@ -35,15 +35,100 @@ except ImportError:  # Windows: sem trava (o merge de duas gravações simultân
 
 OCUPADO_MAX = timedelta(hours=3)  # sessão "ocupada" sem evento há 3 h = caiu
 
-RE_TESTAR = re.compile(r"^\s*vou\s+testar\b[\s:,-]*(.*)", re.I | re.S)
-RE_TERMINEI = re.compile(r"^\s*(terminei|acabei|finalizei)\s+(o\s+)?teste\b(.*)", re.I | re.S)
+# [1.15.0] "vou testar" e "terminei o teste" em qualquer posição, com cuidado com negação, adiamento e pergunta.
+RE_TESTAR = re.compile(r"\bvou\s+(?:come[cç]ar\s+a\s+)?testar\b", re.I)
+RE_TERMINEI = re.compile(r"\b(?:terminei|acabei|finalizei)\s+(?:de\s+testar|(?:o\s+|os\s+)?testes?)\b", re.I)
+RE_NEGA = re.compile(r"\b(n[aã]o|nunca|jamais|nem)\b(\s+\S+){0,3}\s*$", re.I)
+RE_PERGUNTA_ANTES = re.compile(r"\b(ser[aá]\s+que|ser[aá]|devo|posso|quando|quem|por\s*que|como)\b(\s+\S+){0,3}\s*$", re.I)
+RE_ADIA = re.compile(r"\b(mais\s+tarde|depois|amanh[aã]|outro\s+dia|outra\s+hora|semana\s+que\s+vem|m[eê]s\s+que\s+vem|"
+                     r"logo\s+mais|daqui\s+a|daqui\s+(uma|um|\d+)|[àa]\s+noite|de\s+noite|[àa]\s+tarde|de\s+tarde|"
+                     r"em\s+breve|futuramente|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|"
+                     r"no\s+fim\s+de\s+semana|quando\s+(der|puder|tiver))\b", re.I)
+RE_ABERTURA = re.compile(r"^\s*(?:(?:ok|bom|beleza|certo|pronto|ent[aã]o|agora|blz|show|bora)[\s,.!:;-]+)*$", re.I)
+# Só "confirmo" (e variações explícitas): um "sim" ou "certo" solto, respondendo a outra pergunta, não grava um teste longo.
+RE_CONFIRMA = re.compile(r"^\s*(confirmo|confirmado|confirma|pode\s+gravar)\b", re.I)
+TESTE_CONFIRMA_H = 2.0   # fechar teste com mais de 2 h: mostra a duração e pede confirmação
+TESTE_PERGUNTA_H = 12.0  # teste aberto há mais de 12 h: não fecha pela hora atual, pergunta o horário real
 RE_CODAR = re.compile(r"^\s*vou\s+come[cç]ar\s+a\s+codar\b[\s:,-]*(.*)", re.I | re.S)
 RE_PLANEJAR = re.compile(r"^\s*(vou|vamos)\s+(planejar|projetar)\b", re.I)
 RE_FINALIZADO = re.compile(r"^\s*finalizad[oa]\b", re.I)
 RE_FECHA_DIA = re.compile(r"^\s*fecha\s+o\s+dia\b", re.I)
 RE_AVALIE = re.compile(r"^\s*(teste\s+finalizado\b.*\bavali|avali[ae]\s+o\s+teste\b)", re.I | re.S)
 RE_ROTEIRO = re.compile(r"\b(me\s+)?traga\s+o\s+roteiro\s+de\s+teste\b", re.I)
-ARTIGOS = {"o", "a", "os", "as", "do", "da", "de", "dos", "das", "no", "na", "the", "fatia"}
+ARTIGOS = {"o", "a", "os", "as", "do", "da", "de", "dos", "das", "no", "na", "the", "fatia", "agora", "já", "ja",
+           "então", "entao", "aqui", "isso", "essa", "esta", "isto", "a", "e"}
+
+
+def frase_de(texto, m):
+    """Trecho da frase (entre . ! ? ; e quebra de linha) antes e depois do que casou, e se ela termina em '?'."""
+    ini = max(texto.rfind(ch, 0, m.start()) for ch in ".!?;\n") + 1
+    fins = [i for i in (texto.find(ch, m.end()) for ch in ".!?;\n") if i >= 0]
+    fim = min(fins) if fins else len(texto)
+    return texto[ini:m.start()], texto[m.end():fim], fim < len(texto) and texto[fim] == "?", ini
+
+
+def intencao_testar(texto):
+    """('abrir', resto) só quando a frase diz que o teste começa agora; ('duvida', None) quando não dá para saber;
+    (None, None) com negação, adiamento ou pergunta (não abre)."""
+    m = RE_TESTAR.search(texto)
+    if not m:
+        return None, None
+    antes, depois, pergunta, _ = frase_de(texto, m)
+    if pergunta or RE_NEGA.search(antes) or RE_PERGUNTA_ANTES.search(antes) or RE_ADIA.search(antes + " " + depois):
+        return None, None
+    if not RE_ABERTURA.match(antes):
+        return "duvida", None  # 'vou testar' no meio de uma frase: não abre, pergunta
+    return "abrir", depois
+
+
+def intencao_terminei(texto):
+    """(True, resto da frase) quando diz que terminou; (False, None) com negação ou pergunta."""
+    for m in RE_TERMINEI.finditer(texto):
+        antes, depois, pergunta, _ = frase_de(texto, m)
+        if pergunta or RE_NEGA.search(antes) or re.search(r"\b(ainda|vou|quando|se)\s*$", antes, re.I):
+            continue
+        return True, depois
+    return False, None
+
+
+def fim_dito(texto, inicio, agora):
+    """Horário do fim dito na frase. ('agora', agora) sem horário; ('ok', dt); ('incoerente', motivo).
+    'às 21:30', '21h30', '21h', com data opcional 'em 24/11' / '24/11'. Sem data: o horário depois do início
+    (passou da meia-noite = dia seguinte); se houver mais de um dia possível, pede a data."""
+    m = re.search(r"\b(\d{1,2})(?::(\d{2})|h(\d{2})?)(?!\d)", texto)
+    if not m:
+        return "agora", agora
+    hh, mm = int(m.group(1)), int(m.group(2) or m.group(3) or 0)
+    if hh > 23 or mm > 59:
+        return "incoerente", f"o horário {m.group(0)} não existe"
+    d = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", texto)
+    folga = timedelta(minutes=2)
+    if d:
+        ano = int(d.group(3)) if d.group(3) else inicio.year
+        ano += 2000 if ano < 100 else 0
+        try:
+            t = datetime(ano, int(d.group(2)), int(d.group(1)), hh, mm)
+        except ValueError:
+            return "incoerente", "a data dita não existe"
+    else:
+        cand = []
+        t = inicio.replace(hour=hh, minute=mm, second=0)
+        while t <= agora + folga:
+            if t >= inicio:
+                cand.append(t)
+            t += timedelta(days=1)
+        if len(cand) > 1:
+            return "incoerente", (f"o teste está aberto desde {inicio:%d/%m %H:%M} e {hh:02d}:{mm:02d} aconteceu em mais de "
+                                  "um dia: diga a data (ex.: 'terminei o teste em DD/MM às HH:MM')")
+        if not cand:  # nem depois do início nem até agora: antes do início ou ainda não chegou
+            return "incoerente", (f"{hh:02d}:{mm:02d} é antes do início do teste ({inicio:%d/%m %H:%M}) ou ainda não "
+                                  f"chegou (agora são {agora:%d/%m %H:%M})")
+        t = cand[0]
+    if t < inicio:
+        return "incoerente", f"{t:%d/%m %H:%M} é antes do início do teste ({inicio:%d/%m %H:%M})"
+    if t > agora + folga:
+        return "incoerente", f"{t:%d/%m %H:%M} está no futuro (agora são {agora:%d/%m %H:%M})"
+    return "ok", min(t, agora)
 
 
 def autonomo(cfg):
@@ -86,19 +171,6 @@ def nome_da_fatia(texto, raiz, cwd):
                         return it["nome"]
         return tok.strip(".")
     return c.fatia_atual(cwd, raiz)
-
-
-def hora_dita(texto, inicio, agora):
-    """'às 21:30', '21h30', '21h' → a primeira vez que esse horário acontece depois do início do teste
-    (e não depois de agora). Sem horário: agora."""
-    m = re.search(r"\b(\d{1,2})(?::(\d{2})|h(\d{2})?)\b", texto)
-    if not m or int(m.group(1)) > 23:
-        return agora
-    hh, mm = int(m.group(1)), int(m.group(2) or m.group(3) or 0)
-    t = inicio.replace(hour=hh, minute=mm, second=0)
-    if t < inicio:
-        t += timedelta(days=1)
-    return min(t, agora)
 
 
 def contar_codando(raiz, cfg):
@@ -202,8 +274,31 @@ def main():
             tipos_sessao.pop(sid, None)
             perguntou.pop(sid, None)
 
-        teste = next((l for l in linhas if l["tipo"] == "teste" and l["estado"] != "fechada"), None)
+        corrigidas = c.correcoes(linhas)  # teste anulado/corrigido pelo comando de correção não está mais aberto
+        teste = next((l for l in linhas if l["tipo"] == "teste" and l["estado"] != "fechada"
+                      and c.chave_sessao(l) not in corrigidas), None)
         usuario = cfg.get("usuario") or "o usuário"
+        pendente = est.get("fechamento_pendente")
+        if pendente and (not teste or pendente.get("inicio") != teste["inicio"]):
+            est.pop("fechamento_pendente", None)
+            pendente = None
+
+        def fechar_teste(fim, confirmado=False):
+            """Fecha o teste aberto em 'fim'. Mais de 2 h sem confirmação: guarda e pede confirmação."""
+            ini = c.para_dt(teste["inicio"]) or agora
+            h = (fim - ini).total_seconds() / 3600
+            if h > TESTE_CONFIRMA_H and not confirmado:
+                est["fechamento_pendente"] = {"inicio": teste["inicio"], "fim": fim.strftime(c.FMT)}
+                avisos.append(f"[status-projeto] O teste de '{teste['fatia']}' ficaria com {c.horas_txt(h)} "
+                              f"({ini:%d/%m %H:%M} → {fim:%d/%m %H:%M}). NÃO foi gravado: mostre a duração a {usuario} "
+                              "e peça confirmação. Para gravar, a resposta começa com 'confirmo'; se o horário estiver "
+                              "errado, 'terminei o teste às HH:MM' com o horário real.")
+                return False
+            teste["fim"], teste["estado"] = fim.strftime(c.FMT), "fechada"
+            est.pop("fechamento_pendente", None)
+            avisos.append(f"[status-projeto] Teste de '{teste['fatia']}' fechado às {fim:%H:%M} ({h:.1f} h). "
+                          "Siga a regra 'terminei o teste' do CLAUDE.md (pergunte se passou).")
+            return True
 
         if evento == "SessionStart" and teste:
             avisos.append(f"[status-projeto] Há um teste aberto desde {c.data_br(teste['inicio'])} "
@@ -218,24 +313,44 @@ def main():
                               + "). Sugira rodar /instalar-status para continuar de onde parou.")
 
         if evento == "UserPromptSubmit" and prompt:
-            m_ini, m_fim = RE_TESTAR.match(prompt), RE_TERMINEI.match(prompt)
-            if m_ini:
-                if teste:
-                    teste["fim"], teste["estado"] = s_agora, "fechada"
-                nome = nome_da_fatia(m_ini.group(1), raiz, cwd)
-                linhas.append({"inicio": s_agora, "fim": "", "repo": repo, "fatia": nome,
-                               "tipo": "teste", "sessao": "teste", "estado": "aberta"})
-                avisos.append(f"[status-projeto] Teste de '{nome}' começou às {agora:%H:%M} (docs/tempo/sessoes.csv). "
-                              "Siga a regra 'vou testar' do CLAUDE.md e confirme em uma linha.")
-            elif m_fim and teste:
+            ini_acao, resto_ini = intencao_testar(prompt)
+            terminou, resto_fim = intencao_terminei(prompt)
+            if pendente and teste and RE_CONFIRMA.match(prompt) and not RE_NEGA.search(prompt[:40]) and not terminou:
+                fechar_teste(c.para_dt(pendente["fim"]) or agora, confirmado=True)
+            elif terminou and teste:
                 ini = c.para_dt(teste["inicio"]) or agora
-                fim = hora_dita(m_fim.group(3), ini, agora)
-                teste["fim"], teste["estado"] = fim.strftime(c.FMT), "fechada"
-                h = (fim - ini).total_seconds() / 3600
-                avisos.append(f"[status-projeto] Teste de '{teste['fatia']}' fechado às {fim:%H:%M} ({h:.1f} h). "
-                              "Siga a regra 'terminei o teste' do CLAUDE.md (pergunte se passou).")
-            elif m_fim:
+                tipo_fim, valor = fim_dito(resto_fim, ini, agora)
+                if tipo_fim == "incoerente":
+                    avisos.append(f"[status-projeto] Não gravei o fim do teste de '{teste['fatia']}': {valor}. "
+                                  f"Pergunte a {usuario} o horário real ('terminei o teste às HH:MM').")
+                elif tipo_fim == "agora" and (agora - ini) > timedelta(hours=TESTE_PERGUNTA_H):
+                    avisos.append(f"[status-projeto] O teste de '{teste['fatia']}' está aberto desde "
+                                  f"{ini:%d/%m %H:%M} (mais de {TESTE_PERGUNTA_H:.0f} h): não fecho pela hora atual. "
+                                  f"Pergunte a {usuario} a que horas terminou ('terminei o teste em DD/MM às HH:MM').")
+                else:
+                    fechar_teste(valor)
+            elif terminou:
                 avisos.append("[status-projeto] Não há teste aberto em docs/tempo/sessoes.csv. Avise em uma linha.")
+            elif ini_acao == "abrir":
+                velho = teste and (agora - (c.para_dt(teste["inicio"]) or agora)) > timedelta(hours=TESTE_CONFIRMA_H)
+                if velho:
+                    avisos.append(f"[status-projeto] Há um teste aberto de '{teste['fatia']}' desde "
+                                  f"{c.data_br(teste['inicio'])} (mais de {TESTE_CONFIRMA_H:.0f} h). NÃO abri outro nem "
+                                  f"fechei esse pela hora atual: pergunte a {usuario} a que horas o anterior terminou "
+                                  "('terminei o teste às HH:MM') e depois peça 'vou testar' de novo.")
+                else:
+                    if teste:
+                        teste["fim"], teste["estado"] = s_agora, "fechada"
+                    est.pop("fechamento_pendente", None)
+                    nome = nome_da_fatia(resto_ini, raiz, cwd)
+                    linhas.append({"inicio": s_agora, "fim": "", "repo": repo, "fatia": nome,
+                                   "tipo": "teste", "sessao": "teste", "estado": "aberta"})
+                    avisos.append(f"[status-projeto] Teste de '{nome}' começou às {agora:%H:%M} (docs/tempo/sessoes.csv). "
+                                  "Siga a regra 'vou testar' do CLAUDE.md e confirme em uma linha.")
+            elif ini_acao == "duvida":
+                avisos.append("[status-projeto] A mensagem fala em 'vou testar', mas não dá para ter certeza de que o "
+                              "teste começa agora: o teste NÃO foi aberto. Pergunte a "
+                              f"{usuario} (para abrir, a mensagem começa com 'vou testar FATIA_X').")
             elif teste and perguntou.get(sid) != teste["inicio"]:
                 avisos.append(f"[status-projeto] Há um teste aberto desde {c.data_br(teste['inicio'])} "
                               f"('{teste['fatia']}'). Antes de responder, pergunte a {usuario} se o teste terminou e "

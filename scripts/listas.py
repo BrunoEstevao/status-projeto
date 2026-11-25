@@ -205,7 +205,7 @@ def linha_erro(ident, data, app, estado, gravidade, det, texto):
 
 
 def teste_aberto(raiz):
-    sess = c.ler_sessoes(os.path.join(raiz, c.CSV_SESSOES))
+    sess = c.ler_sessoes_corrigidas(os.path.join(raiz, c.CSV_SESSOES))  # [1.15.0] teste anulado não está aberto
     return next((l for l in sess if l["tipo"] == "teste" and l["estado"] != "fechada"), None)
 
 

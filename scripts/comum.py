@@ -532,7 +532,99 @@ def ler_sessoes(caminho):
         nova = (l["fim"], l["estado"] == "fechada")
         if velha is None or nova > (velha["fim"], velha["estado"] == "fechada"):
             unicas[chave] = l
-    return sorted(unicas.values(), key=lambda l: l["inicio"])
+    # [1.15.0] Linhas de correção ficam sempre no fim (na ordem em que foram feitas): o hook regrava o arquivo nesta
+    # ordem, e assim o nº de linha das sessões (o de 'status-projeto sessao listar') não muda depois de uma correção.
+    return sorted(unicas.values(), key=lambda l: (e_correcao(l), l["sessao"].split("|", 2)[1] if e_correcao(l)
+                                                  else l["inicio"]))
+
+
+# ---------------------------------------------------------------- correção de sessão (1.15.0)
+# Uma correção é uma LINHA A MAIS no sessoes.csv; nenhuma linha é apagada nem reescrita. Os dados dela vão no campo
+# "sessao" (que os hooks nunca reescrevem): correcao|<quando>|<anular|ajustar>|<sessao>|<inicio>|<tipo>|<motivo>.
+# inicio/fim/fatia/tipo da linha de correção = os valores corrigidos (anular: fim = inicio, tempo zero).
+# A última correção (pelo <quando>) vale sobre a linha original, mesmo que o fim original seja mais tarde.
+CORRECAO = "correcao"
+
+
+def e_correcao(l):
+    return (l.get("sessao") or "").startswith(CORRECAO + "|")
+
+
+def ler_correcao(l):
+    p = (l.get("sessao") or "").split("|", 6)
+    if len(p) < 7 or p[0] != CORRECAO:
+        return None
+    return {"quando": p[1], "acao": p[2], "sessao": p[3], "inicio": p[4], "tipo": p[5], "motivo": p[6],
+            "novo": {k: l.get(k, "") for k in ("inicio", "fim", "fatia", "tipo")}}
+
+
+def chave_sessao(l):
+    return (l.get("sessao", ""), l.get("inicio", ""), l.get("tipo", ""))
+
+
+def correcoes(linhas):
+    """{chave da linha original: a correção que vale (a mais recente)}."""
+    out = {}
+    for l in linhas:
+        k = ler_correcao(l) if e_correcao(l) else None
+        if k:
+            chave = (k["sessao"], k["inicio"], k["tipo"])
+            if chave not in out or k["quando"] >= out[chave]["quando"]:
+                out[chave] = k
+    return out
+
+
+def aplicar_correcoes(linhas):
+    """Linhas para relatório: sem as linhas de correção e com cada correção aplicada na linha original
+    (marca 'corrigida' = motivo e, ao anular, 'anulada' = True). A leitura crua (ler_sessoes) não muda."""
+    corr = correcoes(linhas)
+    out = []
+    for l in linhas:
+        if e_correcao(l):
+            continue
+        k = corr.get(chave_sessao(l))
+        if k:
+            l = dict(l)
+            if k["acao"] == "anular":
+                l["fim"], l["anulada"] = l["inicio"], True
+            else:
+                for campo in ("inicio", "fim", "fatia", "tipo"):
+                    if k["novo"].get(campo):
+                        l[campo] = k["novo"][campo]
+            l["estado"], l["corrigida"] = "fechada", k["motivo"]
+        out.append(l)
+    return sorted(out, key=lambda l: l["inicio"])
+
+
+def ler_sessoes_corrigidas(caminho):
+    return aplicar_correcoes(ler_sessoes(caminho))
+
+
+def acrescentar_correcao(caminho, original, acao, motivo, novo=None, quando=None):
+    """Acrescenta (no fim do arquivo, sem reescrever nada) a linha de correção da sessão 'original'."""
+    novo = novo or {}
+    motivo = re.sub(r"\s+", " ", str(motivo or "")).replace("|", "/").strip()[:200]
+    quando = quando or agora_s()
+    ini = novo.get("inicio") or original["inicio"]
+    fim = ini if acao == "anular" else (novo.get("fim") or original["fim"] or ini)
+    linha = {"inicio": ini, "fim": fim, "repo": original.get("repo", ""),
+             "fatia": novo.get("fatia") or original.get("fatia", ""), "tipo": novo.get("tipo") or original["tipo"],
+             "sessao": "|".join([CORRECAO, quando, acao, original["sessao"], original["inicio"], original["tipo"], motivo]),
+             "estado": "fechada"}
+    precisa_nl = False
+    try:
+        with open(caminho, "rb") as f:
+            f.seek(0, 2)
+            if f.tell():
+                f.seek(-1, 2)
+                precisa_nl = f.read(1) != b"\n"
+    except FileNotFoundError:
+        pass
+    with open(caminho, "a", newline="", encoding="utf-8") as f:
+        if precisa_nl:
+            f.write("\n")
+        csv.DictWriter(f, fieldnames=CAMPOS, extrasaction="ignore", lineterminator="\n").writerow(linha)
+    return linha
 
 
 def gravar_sessoes(caminho, linhas):

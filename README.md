@@ -106,12 +106,22 @@ uma frase de teste para a gravação no `IDEIAS.md` (a única coisa que o claude
 |---|---|
 | `vou começar a codar` | o primeiro de 📦 (ou a fatia que você disser) vai para 🌐. O Claude avisa se já houver 3 em 🌐 |
 | `finalizado` | a fatia vai para 🧪 com o roteiro do que testar |
-| `vou testar FATIA_X` | começa a contar o tempo de teste |
-| `terminei o teste` / `terminei o teste às 21:30` | fecha o tempo de teste e pergunta se passou (✅ ou volta para 🌐) |
+| `vou testar FATIA_X` | começa a contar o tempo de teste. Não começa com "vou testar mais tarde / depois / amanhã", "não vou testar" ou pergunta |
+| `terminei o teste` (ou `terminei o teste às 21:30`, ou `terminei o teste em 24/11 às 21:30`) | fecha o tempo de teste no horário que você disse (vale em qualquer ponto da mensagem) e pergunta se passou: passou → ✅; não passou → volta para 🌐 |
+| `confirmo` | grava um teste que ficaria com mais de 2 h (o Claude mostra a duração antes; um "sim" solto não grava) |
 | `fecha o dia` | atualiza Parei em / Próximo passo / Pendente, mostra o que mudou e faz commit do status e do tempo |
 | `vou planejar` | o tempo conta como planejamento (o modo plano também conta) |
 
-Se você esquecer um teste aberto, na próxima conversa o Claude pergunta se terminou e a que horas.
+Esqueceu um teste aberto? Na próxima mensagem o Claude pergunta se terminou e a que horas. Horário impossível
+(antes do início, no futuro, ou em mais de um dia sem a data) não é gravado: o Claude pergunta de novo. Teste aberto
+há mais de 12 h não fecha pela hora atual: diga `terminei o teste em DD/MM às HH:MM`.
+
+**Sessão gravada errada** (por exemplo, um teste que não aconteceu): o Claude não edita o `docs/tempo/sessoes.csv`.
+`status-projeto sessao listar` mostra as sessões com o número da linha; `status-projeto sessao corrigir --linha N
+--anular --motivo "..."` zera o tempo (ou `--novo-fim "AAAA-MM-DD HH:MM"`, `--novo-inicio`, `--novo-tipo`,
+`--nova-fatia` ajustam). A correção é uma linha a mais no fim do arquivo, com o motivo; nada é apagado nem reescrito,
+vale a correção mais recente e os relatórios já mostram o valor corrigido (`status-projeto sessao correcoes` lista
+todas).
 
 ## Roteiro de teste por link (opcional)
 
@@ -204,6 +214,7 @@ push); se não conseguir gravar, ele diz que não gravou e mostra a linha pronta
 | `/verificar-integracao` | confere tudo no repo e entrega a frase para testar no claude.ai |
 | `status-projeto testes [configurar]` | configuração do serviço de testes desta máquina |
 | `status-projeto roteiro publicar\|mostrar\|resultado\|voltar\|nova-rodada` | roteiro de teste por link (ver acima) |
+| `status-projeto sessao listar\|corrigir\|correcoes` | corrige uma sessão do `docs/tempo/sessoes.csv` acrescentando uma linha de correção com motivo (ver "No dia a dia") |
 | `status-projeto instalacoes` | instalações do plugin que valem neste projeto (user, project, local), qual vence e, se houver mais de uma, os comandos para ficar com uma só |
 
 Se outro plugin usar o mesmo nome, use o nome completo: `/status-projeto:status-relatorio`.
@@ -233,7 +244,7 @@ projetos o plugin não grava nada.
 - **Hooks** do plugin (início de sessão, mensagem, uso de ferramenta, fim de resposta, fim de sessão) atualizam a linha
   da sessão. **30 minutos sem nenhum evento fecham a sessão** no último evento, então terminal esquecido aberto não conta.
 - **Tipos:** `interativo`; `autonomo` (`claude -p`, Agent SDK, `STATUS_PROJETO_TIPO=autonomo` ou um processo listado em
-  `autonomo_processos` no config); `teste` ("vou testar" → "terminei o teste"); `planejamento` (modo plano ou "vou planejar").
+  `autonomo_processos` no config); `teste` ("vou testar" → "terminei o teste [às HH:MM]"; mais de 2 h pede "confirmo"); `planejamento` (modo plano ou "vou planejar").
   Scripts do projeto que chamam `claude -p` (um supervisor, por exemplo) são achados na instalação, que oferece
   incluir `STATUS_PROJETO_TIPO=autonomo` na chamada (`status-projeto autonomo`).
 - **Fatia** da sessão: a branch de trabalho, ou os itens em 🌐 do `STATUS.md`.

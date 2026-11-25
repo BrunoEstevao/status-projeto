@@ -15,6 +15,11 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 
+try:
+    import fcntl
+except ImportError:  # Windows: sem trava
+    fcntl = None
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import comum as c  # noqa: E402
 import listas as L  # noqa: E402
@@ -1539,13 +1544,14 @@ def cmd_repos(a):
 # =================================================================== dados de horas
 
 class Bloco:
-    __slots__ = ("repo", "fonte", "tipo", "fatia", "ini", "fim", "h", "taxa", "custo_fixo")
+    __slots__ = ("repo", "fonte", "tipo", "fatia", "ini", "fim", "h", "taxa", "custo_fixo", "corrigida")
 
     def __init__(self, repo, fonte, tipo, fatia, ini, fim, taxa):
         self.repo, self.fonte, self.tipo, self.fatia = repo, fonte, tipo, fatia
         self.ini, self.fim, self.taxa = ini, fim, taxa
         self.h = max(0.0, (fim - ini).total_seconds() / 3600)
         self.custo_fixo = None  # custo gravado no CSV (calculado com as horas sem arredondar): vale ele
+        self.corrigida = None  # [1.15.0] motivo da correção da sessão (status-projeto sessao corrigir)
 
     @property
     def custo(self):
@@ -1569,7 +1575,7 @@ def blocos_do_repo(nome, cam, cfg_principal):
     txs = c.taxas(cfg)
     blocos, info = [], {"repo": nome, "instalado": c.ler_config(cam) is not None, "n_commits_est": 0,
                         "corte": None, "estimativa_gravada": False}
-    sess = c.ler_sessoes(os.path.join(cam, c.CSV_SESSOES))
+    sess = c.ler_sessoes_corrigidas(os.path.join(cam, c.CSV_SESSOES))  # [1.15.0] com as correções aplicadas
     agora = c.agora()
     for l in sess:
         ini = c.para_dt(l["inicio"])
@@ -1579,7 +1585,9 @@ def blocos_do_repo(nome, cam, cfg_principal):
         if fim is None:
             continue  # teste ainda aberto: entra quando fechar
         tipo = l["tipo"] if l["tipo"] in c.TIPOS else "interativo"
-        blocos.append(Bloco(nome, "hooks", tipo, l["fatia"], ini, min(fim, agora), c.taxa_em(txs, ini)))
+        b = Bloco(nome, "hooks", tipo, l["fatia"], ini, max(ini, min(fim, agora)), c.taxa_em(txs, ini))
+        b.corrigida = l.get("corrigida")
+        blocos.append(b)
     est = c.ler_estimativa(os.path.join(cam, c.CSV_ESTIMATIVA))
     if est is not None:
         info["estimativa_gravada"] = True
@@ -1640,6 +1648,14 @@ def uniao(blocos, txs):
         custo += dh * taxa  # valor por hora do próprio bloco (o do CSV, quando gravado)
         fim_ate = seg_fim if fim_ate is None else max(fim_ate, seg_fim)
     return h, custo
+
+
+def nota_correcoes(blocos):
+    """[1.15.0] Relatórios indicam quando há sessão corrigida (valor já corrigido)."""
+    corr = [b for b in blocos if b.corrigida]
+    if corr:
+        print(f"  inclui {len(corr)} sessão(ões) corrigida(s) — valores já corrigidos "
+              "(detalhe: status-projeto sessao correcoes)")
 
 
 def soma(blocos):
@@ -1715,6 +1731,7 @@ def cmd_relatorio(a):
         for r in repos:
             linha_h(f"  {r}", *soma([b for b in hk if b.repo == r]), moeda)
     linha_h("subtotal medido", *soma(hk), moeda)
+    nota_correcoes(hk)
 
     print("\nTotal (estimado + medido)")
     for t, rot in (("interativo", "codando interativo"), ("autonomo", "codando autônomo"),
@@ -1807,6 +1824,7 @@ def cmd_historico(a):
         print(f"  {periodo:<15} {(tam + nome)[:42]:<42} {c.horas_txt(h):>9} {c.dinheiro(x['custo'], moeda):>14}"
               f"  {fase_txt}  {fonte}{repos}")
     print(f"\n  Total: {c.horas_txt(total_h)} · {c.dinheiro(total_c, moeda)} · {c.dias_txt(total_h)} dias de 8h")
+    nota_correcoes([b for b in blocos if b.fonte == "hooks"])
 
 
 def cmd_cronograma(a):
@@ -1921,6 +1939,7 @@ def cmd_resumo(a):
         print(f"\nHoras no período: {c.horas_txt(h)} ({c.dinheiro(cu, moeda)}) — "
               + ", ".join(f"{c.NOME_TIPO[t]} {c.horas_txt(soma([b for b in rec if b.tipo == t])[0])}"
                           for t in c.TIPOS if any(b.tipo == t for b in rec)))
+        nota_correcoes(rec)
     print("\n" + L.contagem_txt(raiz, cfg) + " (/status-ideias, /status-erros)")
     if not antigas:
         print("\n(sem versão do STATUS.md no git de antes do período: comparei só pelas datas \"(desde DD/MM)\")")
@@ -1949,11 +1968,14 @@ def cmd_ajuda(a):
             print(f"  aviso: {pr}")
     else:
         print("  STATUS.md não encontrado.")
-    sess = c.ler_sessoes(os.path.join(raiz, c.CSV_SESSOES))
-    teste = next((l for l in sess if l["tipo"] == "teste" and l["estado"] != "fechada"), None)
+    teste = L.teste_aberto(raiz)
     print("\n  " + L.contagem_txt(raiz, cfg))
     if teste:
-        print(f"\n  Teste aberto desde {c.data_br(teste['inicio'])}: {teste['fatia']} (diga 'terminei o teste às HH:MM')")
+        print(f"\n  Teste aberto desde {c.data_br(teste['inicio'])}: {teste['fatia']} (diga 'terminei o teste às HH:MM'"
+              " ou 'terminei o teste em DD/MM às HH:MM'; não aconteceu? status-projeto sessao corrigir)")
+        pend = c.estado_local(raiz).get("fechamento_pendente")
+        if pend and pend.get("inicio") == teste["inicio"]:
+            print(f"  Fim guardado esperando confirmação: {c.data_br(pend['fim'])} (diga 'confirmo' para gravar)")
     blocos, _ = coletar(raiz, cfg)
     sem = [b for b in blocos if b.ini >= c.agora() - timedelta(days=7)]
     h, cu = soma(sem)
@@ -2251,6 +2273,144 @@ def cmd_testes(a):
     sys.exit(3 if probs else 0)
 
 
+# ---------------------------------------------------------------- sessao (1.15.0): corrigir sessão no sessoes.csv
+
+def _linhas_do_arquivo(caminho):
+    """[(nº da linha no arquivo, linha)] como o arquivo está (cabeçalho = linha 1)."""
+    try:
+        with open(caminho, newline="", encoding="utf-8") as f:
+            out = []
+            for i, l in enumerate(csv.DictReader(f), start=2):
+                if not l.get("inicio") or l.get("inicio") == "inicio":
+                    continue
+                out.append((i, {k: l.get(k) or "" for k in c.CAMPOS}))
+            return out
+    except FileNotFoundError:
+        return []
+
+
+def _dur(l):
+    a, b = c.para_dt(l["inicio"]), c.para_dt(l["fim"])
+    if not a or not b:
+        return "aberta"
+    m = int(max(0, (b - a).total_seconds()) // 60)
+    return f"{m // 60} h {m % 60:02d} min"
+
+
+def _dt_arg(s, campo):
+    if not s:
+        return None
+    d = c.para_dt(s.replace("T", " "))
+    if not d or len(s.strip()) < 16:
+        sair(f"{campo}: use AAAA-MM-DD HH:MM (ex.: 2026-11-24 17:46).", 3)
+    return d
+
+
+def cmd_sessao(a):
+    raiz = a.raiz
+    precisa_config(raiz)
+    caminho = os.path.join(raiz, c.CSV_SESSOES)
+    if not os.path.exists(caminho):
+        sair("docs/tempo/sessoes.csv não existe neste repositório.")
+    # O nº de linha só vale se o arquivo já estiver na ordem em que o hook grava (depois de um merge=union pode não
+    # estar): arruma antes de listar/corrigir, como o hook faria no próximo evento, para o nº mostrado não mudar.
+    trava = open(caminho + ".lock", "w")
+    try:
+        if fcntl:
+            fcntl.flock(trava, fcntl.LOCK_EX)
+        brutas = c.ler_sessoes(caminho)
+        if [l for _, l in _linhas_do_arquivo(caminho)] != brutas:
+            c.gravar_sessoes(caminho, brutas)
+    finally:
+        trava.close()
+    corr = c.correcoes(brutas)
+    arquivo = _linhas_do_arquivo(caminho)
+
+    if a.acao == "listar":
+        print("Sessões (nº = linha do docs/tempo/sessoes.csv; cabeçalho = 1)")
+        for n, l in arquivo:
+            if a.dia and not l["inicio"].startswith(a.dia):
+                continue
+            if a.tipo and l["tipo"] != a.tipo:
+                continue
+            k = c.ler_correcao(l) if c.e_correcao(l) else None
+            if k:
+                marca = f"  ← correção ({k['acao']}) da sessão de {k['inicio']} [{k['tipo']}]: {k['motivo']}"
+            else:
+                x = corr.get(c.chave_sessao(l))
+                marca = f"  [corrigida em {x['quando']}: {'anulada' if x['acao'] == 'anular' else 'ajustada'}]" if x else ""
+            print(f"  {n:>4} | {l['inicio']} → {l['fim'] or '(aberta)'} | {_dur(l):>12} | {l['tipo']:<12} | "
+                  f"{(l['fatia'] or '-')[:30]:<30} | {l['estado']}{marca}")
+        return
+
+    if a.acao == "correcoes":
+        lst = [c.ler_correcao(l) for l in brutas if c.e_correcao(l)]
+        lst = [k for k in lst if k]
+        if not lst:
+            print("Nenhuma correção de sessão.")
+            return
+        print("Correções de sessão (vale a mais recente de cada sessão)")
+        for k in sorted(lst, key=lambda k: k["quando"]):
+            orig = next((l for l in brutas if not c.e_correcao(l) and c.chave_sessao(l) == (k["sessao"], k["inicio"], k["tipo"])), None)
+            antes = f"{orig['inicio']} → {orig['fim'] or '(aberta)'} ({_dur(orig)}, {orig['tipo']}, {orig['fatia'] or '-'})" if orig else f"{k['inicio']} [{k['tipo']}] (linha original não encontrada)"
+            n = k["novo"]
+            depois = "anulada (tempo zero)" if k["acao"] == "anular" else f"{n['inicio']} → {n['fim']} ({_dur(n)}, {n['tipo']}, {n['fatia'] or '-'})"
+            print(f"  {k['quando']} | {antes}\n      → {depois}\n      motivo: {k['motivo']}")
+        return
+
+    # corrigir
+    motivo = " ".join(a.motivo or "").strip() if isinstance(a.motivo, list) else (a.motivo or "").strip()
+    if not motivo:
+        sair("Falta o motivo (--motivo \"...\"): toda correção guarda o porquê.", 3)
+    if a.linha:
+        achou = [l for n, l in arquivo if n == a.linha]
+        if not achou:
+            sair(f"Não há a linha {a.linha} no docs/tempo/sessoes.csv (veja: status-projeto sessao listar).", 3)
+        orig = achou[0]
+    elif a.inicio:
+        cand = [l for l in brutas if not c.e_correcao(l) and l["inicio"].startswith(a.inicio.strip())
+                and (not a.tipo or l["tipo"] == a.tipo) and (not a.sessao or l["sessao"] == a.sessao)]
+        if len(cand) != 1:
+            sair(f"{len(cand)} sessões começam em '{a.inicio}'" + (" (use --tipo ou --sessao)" if cand else "")
+                 + ". Veja: status-projeto sessao listar --dia AAAA-MM-DD", 3)
+        orig = cand[0]
+    else:
+        sair("Diga qual sessão: --linha N (de 'status-projeto sessao listar') ou --inicio \"AAAA-MM-DD HH:MM:SS\".", 3)
+    if c.e_correcao(orig):
+        sair("Essa linha já é uma correção. Corrija a sessão original (a correção mais recente vale).", 3)
+    novo_ini, novo_fim = _dt_arg(a.novo_inicio, "--novo-inicio"), _dt_arg(a.novo_fim, "--novo-fim")
+    if a.novo_tipo and a.novo_tipo not in c.TIPOS:
+        sair(f"--novo-tipo: use um de {', '.join(c.TIPOS)}.", 3)
+    fatia = re.sub(r"[\r\n,]+", " ", a.nova_fatia or "").strip()[:80]
+    ajustes = any([novo_ini, novo_fim, a.novo_tipo, fatia])
+    if a.anular == ajustes:
+        sair("Use --anular (tempo zero) OU ajuste com --novo-inicio/--novo-fim/--novo-tipo/--nova-fatia.", 3)
+    ini = novo_ini or c.para_dt(orig["inicio"])
+    fim = novo_fim or c.para_dt(orig["fim"])
+    if not a.anular:
+        if fim is None:
+            sair("A sessão ainda está aberta: informe --novo-fim (ou --anular).", 3)
+        if fim < ini:
+            sair(f"O fim ({fim:%d/%m %H:%M}) é antes do início ({ini:%d/%m %H:%M}).", 3)
+        if fim > c.agora() + timedelta(minutes=2):
+            sair(f"O fim ({fim:%d/%m %H:%M}) está no futuro.", 3)
+    novo = {"inicio": ini.strftime(c.FMT) if novo_ini else "", "fim": fim.strftime(c.FMT) if (novo_fim or not a.anular) and fim else "",
+            "tipo": a.novo_tipo or "", "fatia": fatia}
+    trava = open(caminho + ".lock", "w")
+    try:
+        if fcntl:
+            fcntl.flock(trava, fcntl.LOCK_EX)
+        linha = c.acrescentar_correcao(caminho, orig, "anular" if a.anular else "ajustar", motivo, novo)
+    finally:
+        trava.close()
+    print(f"Antes : {orig['inicio']} → {orig['fim'] or '(aberta)'} ({_dur(orig)}, {orig['tipo']}, {orig['fatia'] or '-'})")
+    print("Depois: anulada (tempo zero)" if a.anular else
+          f"Depois: {linha['inicio']} → {linha['fim']} ({_dur(linha)}, {linha['tipo']}, {linha['fatia'] or '-'})")
+    print(f"Motivo: {motivo[:200]}")
+    print("Linha de correção acrescentada no fim do docs/tempo/sessoes.csv (nenhuma linha apagada ou reescrita). "
+          "Os relatórios já mostram o valor corrigido.")
+
+
 @_recusa
 def cmd_roteiro(a):
     raiz = a.raiz
@@ -2422,6 +2582,19 @@ def main():
     x.add_argument("--json", action="store_true", help="resultado: em JSON")
     x.add_argument("--rodada", type=int, default=None, help="mostrar: uma rodada anterior (registro local)")
     x.add_argument("--fotos", action="store_true", help="mostrar: também os links das fotos da rodada")
+    x = s.add_parser("sessao", help="sessões do sessoes.csv: listar, corrigir (anular/ajustar com motivo), correcoes")
+    x.add_argument("acao", choices=["listar", "corrigir", "correcoes"])
+    x.add_argument("--linha", type=int, default=0, help="corrigir: nº da linha (de 'sessao listar')")
+    x.add_argument("--inicio", default="", help="corrigir: início da sessão (AAAA-MM-DD HH:MM[:SS]), em vez de --linha")
+    x.add_argument("--tipo", default="", help="listar: só este tipo; corrigir com --inicio: o tipo da sessão")
+    x.add_argument("--sessao", default="", help="corrigir com --inicio: o id da sessão (quando houver duas)")
+    x.add_argument("--dia", default="", help="listar: só AAAA-MM-DD")
+    x.add_argument("--anular", action="store_true", help="corrigir: tempo zero")
+    x.add_argument("--novo-inicio", default="")
+    x.add_argument("--novo-fim", default="")
+    x.add_argument("--novo-tipo", default="")
+    x.add_argument("--nova-fatia", default="")
+    x.add_argument("--motivo", default="", help="corrigir: obrigatório")
     s.add_parser("verificar", help="confere a integração")
     x = s.add_parser("instalacoes", help="instalações do plugin que valem aqui (user/project) e como ficar com uma")
     x.add_argument("--json", action="store_true")

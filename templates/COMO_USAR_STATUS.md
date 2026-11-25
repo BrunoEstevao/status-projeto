@@ -30,12 +30,22 @@ Todo item termina com **(desde DD/MM)**, a data em que entrou na fase. **(?)** =
 |---|---|
 | `vou começar a codar` (ou `vou começar a codar FATIA_X`) | o primeiro de 📦 (ou o que você disse) vai para 🌐. Avisa se já houver 3 em 🌐 |
 | `finalizado` | a fatia em 🌐 vai para 🧪 com o roteiro do que testar |
-| `vou testar FATIA_X` | começa a contar o tempo de teste |
-| `terminei o teste` (ou `terminei o teste às 21:30`) | fecha o tempo de teste e pergunta se passou: passou → ✅; não passou → volta para 🌐 |
+| `vou testar FATIA_X` | começa a contar o tempo de teste. Não começa com "vou testar mais tarde / depois / amanhã", "não vou testar" ou pergunta |
+| `terminei o teste` (ou `terminei o teste às 21:30`, ou `terminei o teste em 24/11 às 21:30`) | fecha o tempo de teste no horário que você disse (vale em qualquer ponto da mensagem) e pergunta se passou: passou → ✅; não passou → volta para 🌐 |
+| `confirmo` | grava um teste que ficaria com mais de 2 h (o Claude mostra a duração antes; um "sim" solto não grava) |
 | `fecha o dia` | atualiza Parei em / Próximo passo / Pendente, mostra o que mudou e faz commit do STATUS.md e do tempo |
 | `vou planejar` | o tempo passa a contar como planejamento (o modo plano também conta) |
 
-Esqueceu um teste aberto? Na próxima mensagem o Claude pergunta se terminou e a que horas.
+Esqueceu um teste aberto? Na próxima mensagem o Claude pergunta se terminou e a que horas. Horário impossível
+(antes do início, no futuro, ou em mais de um dia sem a data) não é gravado: o Claude pergunta de novo. Teste aberto
+há mais de 12 h não fecha pela hora atual: diga `terminei o teste em DD/MM às HH:MM`.
+
+**Sessão gravada errada** (por exemplo, um teste que não aconteceu): o Claude não edita o `docs/tempo/sessoes.csv`.
+`status-projeto sessao listar` mostra as sessões com o número da linha; `status-projeto sessao corrigir --linha N
+--anular --motivo "..."` zera o tempo (ou `--novo-fim "AAAA-MM-DD HH:MM"`, `--novo-inicio`, `--novo-tipo`,
+`--nova-fatia` ajustam). A correção é uma linha a mais no fim do arquivo, com o motivo; nada é apagado nem reescrito,
+vale a correção mais recente e os relatórios já mostram o valor corrigido (`status-projeto sessao correcoes` lista
+todas).
 
 ## Roteiro de teste por link (opcional)
 Só vale numa máquina com o serviço de testes configurado (`status-projeto testes configurar --pasta ... --url ...`,
@@ -99,6 +109,7 @@ mesmo id. Não são status (o status continua só no `STATUS.md`).
 | `/status-ideias` | ideias pendentes: listar, anotar, mudar o estado (virou fatia, descartada, mantida) |
 | `/status-erros` | erros a corrigir: listar, anotar, completar, mudar o estado, montar a fatia de correção |
 | `/status-valor 180` | muda o valor da hora daqui para frente (nunca retroativo) |
+| `status-projeto sessao listar\|corrigir\|correcoes` | corrige uma sessão gravada errada no `docs/tempo/sessoes.csv` (linha de correção com motivo; nada é apagado) |
 | `/verificar-integracao` | confere tudo no repo e dá a frase para testar no claude.ai |
 | `/instalar-status` | rodar de novo é seguro: verifica, repara o que faltar ou atualiza |
 

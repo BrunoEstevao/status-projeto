@@ -175,11 +175,11 @@ for r in l:
 w = csv.DictWriter(open(p, "w", newline=""), fieldnames=l[0].keys()); w.writeheader(); w.writerows(l)
 print(ini.strftime("%H"))
 PY
-H1=$(python3 -c "from datetime import datetime,timedelta;print(((datetime.now()-timedelta(hours=26)).replace(minute=0)+timedelta(hours=1)).strftime('%H:%M'))")
+H1=$(python3 -c "from datetime import datetime,timedelta;print(((datetime.now()-timedelta(hours=26)).replace(minute=0)+timedelta(hours=1)).strftime('%d/%m às %H:%M'))")  # [1.15.0] aberto há mais de um dia: com a data
 S3="cccccccc-0000-0000-0000-000000000003"
 echo "    nova sessão com teste esquecido:"; evento "$H" "$S3" SessionStart | sed 's/^/    | /'
-evento "$H" "$S3" UserPromptSubmit "terminei o teste às $H1" | sed 's/^/    | /'
-checa "teste esquecido fechado na hora dita (1,0 h)" "evento $H x Stop >/dev/null; $SP --raiz $H relatorio | grep -q 'testando'"
+evento "$H" "$S3" UserPromptSubmit "terminei o teste em $H1" | sed 's/^/    | /'
+checa "teste esquecido fechado na hora dita, com a data (1,0 h)" "evento $H x Stop >/dev/null; $SP --raiz $H relatorio | grep -q 'testando' && ! grep -q ',teste,teste,aberta' $H/docs/tempo/sessoes.csv"
 evento "$H" "$S3" SessionEnd > /dev/null
 # Merge=union duplicando a mesma linha: vale a de fim mais tarde
 tail -1 "$CSV" | sed 's/,fechada$/,aberta/' >> "$CSV"
@@ -1094,6 +1094,119 @@ print(c.chave_versao("1.11.0") > c.chave_versao("1.9.0"), c.chave_versao("1.1.1-
 PY
 )"
 checa "versões comparadas como números (1.11.0 > 1.9.0)" "[ \"\$OUT\" = 'True True' ]"
+
+echo "== 20. Tempo de teste: correção de sessão e frases (1.15.0)"
+W="$BASE/medicao"; rm -rf "$W"; mkdir -p "$W"; git -C "$W" init -q -b main
+instalar "$W" > /dev/null
+WCSV="$W/docs/tempo/sessoes.csv"; mkdir -p "$W/docs/tempo"
+# Caso real (anonimizado, 24/11): linhas 13 e 16 = 6 h 27 min de teste da FATIA_13 com tempo real zero
+python3 - "$WCSV" <<'PY'
+import sys
+linhas = ["inicio,fim,repo,fatia,tipo,sessao,estado"]
+for i in range(11):
+    linhas.append(f"2026-11-24 {i:02d}:00:00,2026-11-24 {i:02d}:05:00,medicao,,interativo,s{i},fechada")
+linhas.append("2026-11-24 17:46:00,2026-11-24 23:13:06,medicao,FATIA_13,teste,teste,fechada")          # linha 13
+linhas.append("2026-11-24 19:18:43,2026-11-24 21:33:06,medicao,,interativo,s-tarde,fechada")
+linhas.append("2026-11-24 22:12:25,2026-11-24 23:23:00,medicao,,interativo,s-noite,fechada")
+linhas.append("2026-11-24 23:13:06,2026-11-25 00:12:58,medicao,mais,teste,teste,fechada")              # linha 16
+open(sys.argv[1], "w").write("\n".join(linhas) + "\n")
+PY
+ANTES="$(cat "$WCSV")"
+OUT="$($SP --raiz $W sessao listar --tipo teste)"
+checa "1. sessao listar mostra as linhas 13 e 16 (caso real) com o nº da linha do arquivo" "grep -q '^    13 | 2026-11-24 17:46:00' <<<\"\$OUT\" && grep -q '^    16 | 2026-11-24 23:13:06' <<<\"\$OUT\""
+TESTE_ANTES="$($SP --raiz $W relatorio | grep -m1 ' testando')"
+$SP --raiz $W sessao corrigir --linha 13 --anular --motivo "teste não aconteceu (hook abriu sozinho)" > /dev/null
+evento "$W" w0 SessionStart > /dev/null; evento "$W" w0 Stop > /dev/null  # na vida real o hook roda entre os dois comandos
+$SP --raiz $W sessao corrigir --linha 16 --anular --motivo "'vou testar mais tarde' abriu teste" > /dev/null
+checa "1. correção só acrescenta linhas (as originais continuam iguais, na mesma ordem)" "[ \"\$(head -n 16 $WCSV)\" = \"\$ANTES\" ] && [ \$(wc -l < $WCSV) = 19 ]"
+checa "1. com o hook regravando entre as correções, a 2ª correção acerta a linha 16 (o teste das 23:13), não outra" "sed -n 19p $WCSV | grep -q '|anular|teste|2026-11-24 23:13:06|teste|' && ! grep -q '|s-noite|' $WCSV"
+
+REL="$($SP --raiz $W relatorio)"
+checa "1. relatório: teste corrigido para 0 h (era 6,4 h = 6 h 27 min) e avisa que houve correção" "grep -q '6,4 h' <<<\"\$TESTE_ANTES\" && grep -m1 ' testando' <<<\"\$REL\" | grep -q ' 0,0 h' && grep -q 'inclui 2 sessão(ões) corrigida(s)' <<<\"\$REL\""
+checa "1. a correção vale mesmo com o fim original mais tarde (vale o fim mais tarde não ignora a correção)" "python3 -c \"import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;l=[x for x in c.ler_sessoes_corrigidas('$WCSV') if x['tipo']=='teste'];sys.exit(0 if len(l)==2 and all(x.get('anulada') and x['fim']==x['inicio'] for x in l) else 1)\""
+$SP --raiz $W sessao corrigir --linha 14 --novo-fim "2026-11-24 20:00" --nova-fatia FATIA_14 --motivo "saí às 20h" > /dev/null
+$SP --raiz $W sessao corrigir --linha 14 --novo-fim "2026-11-24 20:30" --motivo "na verdade 20h30" > /dev/null
+checa "1. ajustar fim e fatia; a correção mais recente vale" "python3 -c \"import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;l=[x for x in c.ler_sessoes_corrigidas('$WCSV') if x['sessao']=='s-tarde'][0];sys.exit(0 if l['fim']=='2026-11-24 20:30:00' and l['corrigida']=='na verdade 20h30' else 1)\""
+checa "1. sem motivo: recusa (código 3)" "$SP --raiz $W sessao corrigir --linha 15 --anular > /dev/null 2>&1; [ \$? = 3 ]"
+checa "1. fim antes do início ou no futuro: recusa (código 3)" "$SP --raiz $W sessao corrigir --linha 15 --novo-fim '2026-11-24 10:00' --motivo x > /dev/null 2>&1; [ \$? = 3 ] && $SP --raiz $W sessao corrigir --linha 15 --novo-fim '2099-01-01 10:00' --motivo x > /dev/null 2>&1; [ \$? = 3 ]"
+checa "1. corrigir uma linha de correção: recusa (código 3)" "$SP --raiz $W sessao corrigir --linha 18 --anular --motivo x > /dev/null 2>&1; [ \$? = 3 ]"
+OUT="$($SP --raiz $W sessao correcoes)"
+checa "1. sessao correcoes lista antes, depois e motivo" "grep -q 'anulada (tempo zero)' <<<\"\$OUT\" && grep -q 'motivo: teste não aconteceu' <<<\"\$OUT\""
+evento "$W" w1 SessionStart > /dev/null; evento "$W" w1 Stop > /dev/null
+checa "1. o hook regrava o CSV sem perder as correções" "[ \$(grep -c '^.*,correcao|' $WCSV) = 4 ]"
+checa "1. relatorio, historico e resumo rodam com correções" "$SP --raiz $W relatorio > /dev/null && $SP --raiz $W historico | grep -q 'corrigida' && $SP --raiz $W resumo --dias 9999 > /dev/null"
+echo "2026-11-20 08:00:00,2026-11-20 09:00:00,medicao,,interativo,s-merge,fechada" >> "$WCSV"  # chegou por merge, fora de ordem
+OUT="$($SP --raiz $W sessao listar --dia 2026-11-20)"
+N="$(sed -n 's/^ *\([0-9]*\) | 2026-11-20 08:00:00.*/\1/p' <<<"$OUT")"
+evento "$W" w1 Stop > /dev/null
+checa "1. arquivo fora de ordem (merge): o listar arruma antes e o nº mostrado continua certo depois do hook" "[ -n \"\$N\" ] && sed -n \"\${N}p\" $WCSV | grep -q ',s-merge,'"
+
+# 2. 'vou testar' com adiamento, negação ou pergunta não abre
+abertos() { python3 -c "import sys;sys.path.insert(0,'$PLUGIN/scripts');import comum as c;print(sum(1 for l in c.ler_sessoes_corrigidas('$WCSV') if l['tipo']=='teste' and l['estado']!='fechada'))"; }
+for frase in "vou testar mais tarde" "vou testar depois" "vou testar amanhã" "amanhã vou testar a FATIA_13" "não vou testar hoje" "será que vou testar?" "vou testar?"; do
+  evento "$W" w2 UserPromptSubmit "$frase" > /dev/null
+done
+checa "2. adiamento/negação/pergunta não abrem teste (mais tarde, depois, amanhã, não vou, será que)" "[ \$(abertos) = 0 ]"
+OUT="$(evento "$W" w2 UserPromptSubmit "fiz o deploy e vou testar")"
+checa "2. 'vou testar' no meio da frase: não abre e manda perguntar" "[ \$(abertos) = 0 ] && grep -q 'NÃO foi aberto' <<<\"\$OUT\""
+OUT="$(evento "$W" w2 UserPromptSubmit "Ok, vou testar agora a FATIA_13")"
+checa "2. início agora abre (fatia FATIA_13, não 'agora')" "[ \$(abertos) = 1 ] && grep -q ',FATIA_13,teste,teste,aberta' $WCSV"
+
+# 3. 'terminei o teste' no meio da mensagem; negação não fecha
+OUT="$(evento "$W" w2 UserPromptSubmit "ainda não terminei o teste, falta o login")"
+checa "3. 'ainda não terminei o teste' não fecha" "[ \$(abertos) = 1 ]"
+OUT="$(evento "$W" w2 UserPromptSubmit "deu tudo certo. Então, terminei o teste, pode seguir")"
+checa "3. 'terminei o teste' no meio da mensagem fecha" "[ \$(abertos) = 0 ] && grep -q 'fechado às' <<<\"\$OUT\""
+
+# 4. horário informado
+recuar() {  # recuar MIN: o teste aberto passa a ter começado há MIN minutos
+  python3 - "$WCSV" "$1" <<'PY'
+import csv, sys
+from datetime import datetime, timedelta
+p, m = sys.argv[1], int(sys.argv[2])
+l = list(csv.DictReader(open(p)))
+for r in l:
+    if r["tipo"] == "teste" and r["estado"] != "fechada":
+        r["inicio"] = (datetime.now() - timedelta(minutes=m)).replace(second=0).strftime("%Y-%m-%d %H:%M:%S")
+w = csv.DictWriter(open(p, "w", newline=""), fieldnames=l[0].keys(), lineterminator="\n"); w.writeheader(); w.writerows(l)
+PY
+}
+hora() { python3 -c "from datetime import datetime,timedelta;print((datetime.now()+timedelta(minutes=$1)).strftime('%H:%M'))"; }
+evento "$W" w3 UserPromptSubmit "vou testar FATIA_HORA" > /dev/null; recuar 60
+HM=$(hora -30)
+OUT="$(evento "$W" w3 UserPromptSubmit "beleza, terminei o teste às $HM")"
+checa "4. 'terminei o teste às HH:MM' usa o horário informado, não a hora da mensagem" "grep -q \"fechado às $HM\" <<<\"\$OUT\" && grep -q ',FATIA_HORA,teste,teste,fechada' $WCSV && grep ',FATIA_HORA,teste,' $WCSV | grep -q \"$HM\""
+evento "$W" w3 UserPromptSubmit "vou testar FATIA_FUTURO" > /dev/null; recuar 30
+OUT="$(evento "$W" w3 UserPromptSubmit "terminei o teste às $(hora 45)")"
+checa "4. horário no futuro: não grava e pergunta" "[ \$(abertos) = 1 ] && grep -q 'Não gravei o fim' <<<\"\$OUT\""
+OUT="$(evento "$W" w3 UserPromptSubmit "terminei o teste às $(hora -45)")"
+checa "4. horário antes do início: não grava e pergunta" "[ \$(abertos) = 1 ] && grep -q 'antes do início' <<<\"\$OUT\""
+OUT="$(python3 - "$PLUGIN/scripts" <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import tempo_hook as t
+from datetime import datetime
+print(t.fim_dito(" às 00:30", datetime(2026, 11, 24, 22, 0), datetime(2026, 11, 25, 1, 0)),
+      t.fim_dito(" às 10:00", datetime(2026, 11, 23, 9, 0), datetime(2026, 11, 25, 12, 0))[0],
+      t.fim_dito(" em 24/11 às 10:00", datetime(2026, 11, 23, 9, 0), datetime(2026, 11, 25, 12, 0)))
+PY
+)"
+checa "4. atravessou a meia-noite (22:00 → 00:30 = dia seguinte); 2 dias possíveis sem data = pergunta; com data, grava" "grep -q \"('ok', datetime.datetime(2026, 11, 25, 0, 30)) incoerente ('ok', datetime.datetime(2026, 11, 24, 10, 0))\" <<<\"\$OUT\""
+evento "$W" w3 UserPromptSubmit "terminei o teste" > /dev/null
+
+# 5. proteção extra
+evento "$W" w4 UserPromptSubmit "vou testar FATIA_LONGA" > /dev/null; recuar 180
+OUT="$(evento "$W" w4 UserPromptSubmit "terminei o teste")"
+checa "5. mais de 2 h: mostra a duração e pede confirmação, sem gravar" "[ \$(abertos) = 1 ] && grep -q 'NÃO foi gravado' <<<\"\$OUT\" && grep -q '3,0 h' <<<\"\$OUT\""
+OUT="$(evento "$W" w4 UserPromptSubmit "vou testar FATIA_OUTRA")"
+checa "5. 'vou testar' com teste aberto há mais de 2 h: não fecha o anterior pela hora atual" "[ \$(abertos) = 1 ] && grep -q 'NÃO abri outro' <<<\"\$OUT\" && ! grep -q ',FATIA_OUTRA,' $WCSV"
+OUT="$(evento "$W" w4 UserPromptSubmit "sim, pode seguir")"
+checa "5. 'sim' solto não grava o teste longo (só 'confirmo')" "[ \$(abertos) = 1 ]"
+OUT="$(evento "$W" w4 UserPromptSubmit "confirmo")"
+checa "5. 'confirmo' grava o fim guardado" "[ \$(abertos) = 0 ] && grep -q 'fechado às' <<<\"\$OUT\" && grep ',FATIA_LONGA,' $WCSV | grep -q ',fechada'"
+evento "$W" w5 UserPromptSubmit "vou testar FATIA_ESQUECIDA" > /dev/null; recuar 780
+OUT="$(evento "$W" w5 UserPromptSubmit "terminei o teste")"
+checa "5. aberto há mais de 12 h: não fecha pela hora atual, pergunta o horário real" "[ \$(abertos) = 1 ] && grep -q 'não fecho pela hora atual' <<<\"\$OUT\""
+$SP --raiz $W sessao corrigir --inicio "$(grep ',FATIA_ESQUECIDA,' $WCSV | cut -d, -f1)" --tipo teste --anular --motivo "esquecido aberto" > /dev/null
+checa "5. teste aberto anulado pela correção deixa de estar aberto" "[ \$(abertos) = 0 ] && [ -z \"\$(evento $W w6 UserPromptSubmit 'oi')\" ]"
 
 echo
 echo "Saídas em $BASE (saida_*.txt). Falhas: $FALHAS"
